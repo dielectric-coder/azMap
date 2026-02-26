@@ -1,5 +1,7 @@
 # azMap
 
+> **W.I.P.** — This project is a work in progress and not very useful yet. Expect rough edges, missing features, and breaking changes.
+
 Interactive azimuthal equidistant map projection viewer. Given a center location, it projects the entire world map centered on that point and draws a line to a target location, showing distance and azimuth information.
 
 ![OpenGL](https://img.shields.io/badge/OpenGL-3.3%2B-blue)
