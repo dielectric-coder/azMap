@@ -13,7 +13,7 @@ Interactive azimuthal equidistant map projection viewer. Given a center location
 - Azimuthal equidistant projection centered on any point on Earth
 - Coastline and country border rendering from Natural Earth shapefiles
 - Great-circle line between center and target locations
-- Distance, azimuth-to, and azimuth-from readout
+- Distance, azimuth-to, and azimuth-from readout with live local/UTC clocks
 - Center-based range/azimuth grid (concentric rings every 5000 km, radial lines every 30 degrees)
 - Named location labels (optional `-c` / `-t` flags)
 - North pole indicator triangle

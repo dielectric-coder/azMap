@@ -96,4 +96,6 @@ shaders/
 
 **Text rendering**: Uses a built-in vector stroke font (`text.c`) — characters are defined as line segments, rendered with GL_LINES using the same shader. No external font dependencies.
 
+**HUD text**: The top-left overlay shows distance/azimuth info and live local/UTC clocks, rebuilt every second in the main loop.
+
 **Labels**: Location labels are rebuilt each frame by projecting marker km-positions through the MVP to screen coordinates, then rendered in pixel-space. The center label is cyan and the target label is orange.

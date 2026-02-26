@@ -124,7 +124,7 @@ For backward compatibility, a bare fifth positional argument is also accepted as
 
 ### Text Overlays
 
-- **Top-left HUD** (white) - Distance in km, azimuth to target, azimuth from target
+- **Top-left HUD** (white) - Distance in km, azimuth to/from target, local and UTC clocks (updated every second)
 - **Center label** (cyan) - Center location name and coordinates
 - **Target label** (orange) - Target location name and coordinates
 

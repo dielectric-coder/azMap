@@ -279,13 +279,9 @@ int main(int argc, char **argv)
     double npx, npy;
     projection_forward(90.0, 0.0, &npx, &npy);
 
-    /* Build text overlay */
+    /* Text overlay (rebuilt each second for clock update) */
     text_init();
-    char info_text[192];
-    snprintf(info_text, sizeof(info_text), "Dist: %.1f km  Az to: %.1f^  Az from: %.1f^", dist, az_to, az_from);
-    float text_verts[4096];
-    int text_vcount = text_build(info_text, 16.0f, 16.0f, 20.0f, text_verts, 2048);
-    renderer_upload_text(&renderer, text_verts, text_vcount);
+    float text_verts[8192];
 
     /* Camera — use actual framebuffer size (differs from window size on HiDPI) */
     Camera cam;
@@ -339,6 +335,30 @@ int main(int argc, char **argv)
             label_size, label_verts + center_vcount * 2, 4096 - center_vcount);
 
         renderer_upload_labels(&renderer, label_verts, center_vcount + target_vcount, center_vcount);
+
+        /* Rebuild HUD text every second (includes live clock) */
+        {
+            static time_t last_text_update = 0;
+            time_t now = time(NULL);
+            if (now != last_text_update) {
+                last_text_update = now;
+                struct tm *gt = gmtime(&now);
+                struct tm *lt = localtime(&now);
+                char line1[128], line2[128];
+                snprintf(line1, sizeof(line1),
+                         "Dist: %.1f km  Az to: %.1f^  Az from: %.1f^",
+                         dist, az_to, az_from);
+                snprintf(line2, sizeof(line2),
+                         "Local: %02d:%02d:%02d  UTC: %02d:%02d:%02d",
+                         lt->tm_hour, lt->tm_min, lt->tm_sec,
+                         gt->tm_hour, gt->tm_min, gt->tm_sec);
+                float size = 20.0f;
+                int vc = text_build(line1, 16.0f, 16.0f, size, text_verts, 4096);
+                vc += text_build(line2, 16.0f, 16.0f + size * 1.4f, size,
+                                 text_verts + vc * 2, 4096 - vc);
+                renderer_upload_text(&renderer, text_verts, vc);
+            }
+        }
 
         /* Update night overlay periodically */
         {
