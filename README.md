@@ -53,6 +53,13 @@ Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/) shape
 | R | Reset view |
 | Q / Esc | Quit |
 
+## Planned Features
+
+This list is tentative and will likely change.
+
+0. Configuration file for QTH (home station location)
+1. Mode selection: standalone, WSJT-X query, QRZ lookup
+
 ## License
 
 MIT
