@@ -23,14 +23,31 @@ mkdir -p build && cd build && cmake .. && make
 ```bash
 # From the build directory
 ./azmap <center_lat> <center_lon> <target_lat> <target_lon> [options]
+./azmap <target_lat> <target_lon> [options]   # center from config
 
 # Example: center on Madrid, line to Paris
 ./azmap 40.4168 -3.7038 48.8566 2.3522 -c Madrid -t Paris
+
+# With config file providing center:
+./azmap 48.8566 2.3522 -t Paris
 ```
+
+### Config File
+
+Optional. Place at `~/.config/azmap.conf`:
+
+```
+# azMap configuration
+name = Madrid
+lat = 40.4168
+lon = -3.7038
+```
+
+Lines starting with `#` are comments. Whitespace around `=` is ignored. `lat` and `lon` must both be present to be used. CLI args always override config values.
 
 ### Options
 
-- `-c NAME` — Center location name (displayed as label)
+- `-c NAME` — Center location name (displayed as label; overrides config name)
 - `-t NAME` — Target location name (displayed as label)
 - `-s PATH` — Shapefile path override
 
@@ -54,6 +71,7 @@ Download and extract into `data/`:
 ```
 src/
 ├── main.c          Entry point, GLFW window, main loop, CLI arg parsing, label building
+├── config.h/c      Config file parser (~/.config/azmap.conf)
 ├── projection.h/c  Azimuthal equidistant forward/inverse projection math
 ├── map_data.h/c    Shapefile loading (shapelib), vertex array management, reprojection
 ├── grid.h/c        Center-based range/azimuth grid (concentric rings + radial lines)

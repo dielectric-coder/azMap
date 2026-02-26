@@ -31,6 +31,10 @@ mkdir -p build && cd build && cmake .. && make
 
 # Run: center on Madrid, line to Paris
 ./azmap 40.4168 -3.7038 48.8566 2.3522 -c Madrid -t Paris
+
+# Or set up a config file for your QTH and just pass the target:
+echo -e "name = Madrid\nlat = 40.4168\nlon = -3.7038" > ~/.config/azmap.conf
+./azmap 48.8566 2.3522 -t Paris
 ```
 
 See [User Guide](doc/user-guide.md) for full usage details and [Developer Guide](doc/dev-guide.md) for architecture and contributing info.
@@ -57,7 +61,7 @@ Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/) shape
 
 This list is tentative and will likely change.
 
-0. Configuration file for QTH (home station location)
+0. ~~Configuration file for QTH (home station location)~~ Done
 1. Mode selection: standalone, WSJT-X query, QRZ lookup
 
 ## License

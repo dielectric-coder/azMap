@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <libgen.h>
 #include <limits.h>
 #include <unistd.h>
@@ -15,6 +16,7 @@
 #include "input.h"
 #include "text.h"
 #include "grid.h"
+#include "config.h"
 
 #define DEFAULT_WIDTH  800
 #define DEFAULT_HEIGHT 800
@@ -72,6 +74,7 @@ static void print_usage(const char *prog)
 {
     fprintf(stderr,
         "Usage: %s <center_lat> <center_lon> <target_lat> <target_lon> [options]\n"
+        "       %s <target_lat> <target_lon> [options]  (center from config)\n"
         "\n"
         "  center_lat/lon  Center of azimuthal equidistant projection (degrees)\n"
         "  target_lat/lon  Second location to draw a line to (degrees)\n"
@@ -81,33 +84,68 @@ static void print_usage(const char *prog)
         "  -t NAME    Target location name\n"
         "  -s PATH    Shapefile path override (default: %s)\n"
         "\n"
+        "Config file: ~/.config/azmap.conf\n"
+        "  name = Madrid\n"
+        "  lat = 40.4168\n"
+        "  lon = -3.7038\n"
+        "\n"
         "Controls:\n"
         "  Scroll       Zoom in/out\n"
         "  Drag         Pan the map\n"
         "  Arrow keys   Pan the map\n"
         "  R            Reset view\n"
         "  Q / Esc      Quit\n",
-        prog, DEFAULT_SHP_REL);
+        prog, prog, DEFAULT_SHP_REL);
 }
 
 int main(int argc, char **argv)
 {
-    if (argc < 5) {
-        print_usage(argv[0]);
-        return 1;
-    }
+    /* Load config file (optional) */
+    Config cfg;
+    int has_config = (config_load(&cfg) == 0 && cfg.valid);
 
-    double center_lat = atof(argv[1]);
-    double center_lon = atof(argv[2]);
-    double target_lat = atof(argv[3]);
-    double target_lon = atof(argv[4]);
-
+    double center_lat, center_lon, target_lat, target_lon;
     const char *center_name = NULL;
     const char *target_name = NULL;
     const char *shp_override = NULL;
 
-    /* Parse optional flags after the 4 positional args */
-    int i = 5;
+    /* Determine how many positional args we have (before any -flag).
+     * Negative numbers (e.g. -3.7038) are positional, not flags. */
+    int npos = 0;
+    for (int j = 1; j < argc; j++) {
+        if (argv[j][0] == '-' && !isdigit((unsigned char)argv[j][1]) && argv[j][1] != '.')
+            break;
+        npos++;
+    }
+
+    int opt_start; /* index where flag parsing begins */
+
+    if (npos >= 4) {
+        /* Full mode: center + target from CLI */
+        center_lat = atof(argv[1]);
+        center_lon = atof(argv[2]);
+        target_lat = atof(argv[3]);
+        target_lon = atof(argv[4]);
+        opt_start = 5;
+    } else if (npos >= 2 && has_config) {
+        /* Config mode: center from config, target from CLI */
+        center_lat = cfg.lat;
+        center_lon = cfg.lon;
+        if (cfg.name[0])
+            center_name = cfg.name;
+        target_lat = atof(argv[1]);
+        target_lon = atof(argv[2]);
+        opt_start = 3;
+    } else {
+        if (npos >= 2 && !has_config)
+            fprintf(stderr, "Error: 2 args given but no valid config file found.\n"
+                            "Create ~/.config/azmap.conf with lat and lon, or pass 4 positional args.\n\n");
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    /* Parse optional flags */
+    int i = opt_start;
     while (i < argc) {
         if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
             center_name = argv[++i];

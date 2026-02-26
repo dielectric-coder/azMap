@@ -21,6 +21,7 @@ endif()
 
 add_executable(azmap
     src/main.c
+    src/config.c
     src/projection.c
     src/map_data.c
     src/renderer.c

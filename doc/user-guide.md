@@ -48,10 +48,27 @@ data/
 
 Coastlines are required. Country borders are optional and will be silently skipped if not found.
 
+## Config File
+
+You can set a default center location (your QTH) in `~/.config/azmap.conf` so you only need to specify the target on the command line:
+
+```
+# azMap configuration
+name = Madrid
+lat = 40.4168
+lon = -3.7038
+```
+
+- Lines starting with `#` are comments
+- Whitespace around `=` is ignored
+- `lat` and `lon` must both be present to be used; `name` is optional
+- CLI arguments always override config values
+
 ## Usage
 
 ```
 ./azmap <center_lat> <center_lon> <target_lat> <target_lon> [options]
+./azmap <target_lat> <target_lon> [options]   # center from config
 ```
 
 ### Positional Arguments
@@ -63,11 +80,13 @@ Coastlines are required. Country borders are optional and will be silently skipp
 | `target_lat` | Latitude of target location |
 | `target_lon` | Longitude of target location |
 
+When a valid config file provides the center location, only `target_lat` and `target_lon` are required.
+
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `-c NAME` | Display name for the center location |
+| `-c NAME` | Display name for the center location (overrides config name) |
 | `-t NAME` | Display name for the target location |
 | `-s PATH` | Override the default coastline shapefile path |
 
@@ -78,6 +97,9 @@ For backward compatibility, a bare fifth positional argument is also accepted as
 ```bash
 # Madrid to Paris, with names
 ./azmap 40.4168 -3.7038 48.8566 2.3522 -c Madrid -t Paris
+
+# With config file providing center — just pass the target
+./azmap 48.8566 2.3522 -t Paris
 
 # Tokyo to New York
 ./azmap 35.6762 139.6503 40.7128 -74.0060 -c Tokyo -t "New York"

@@ -9,6 +9,7 @@ azMap is a single-binary C11 application using OpenGL 3.3 core profile. All rend
 ```
 src/
   main.c            Entry point, GLFW window, CLI parsing, main loop
+  config.h/c        Config file parser (~/.config/azmap.conf)
   projection.h/c    Azimuthal equidistant forward/inverse projection math
   map_data.h/c      Shapefile loading (shapelib), vertex arrays, reprojection
   grid.h/c          Center-based range/azimuth grid generation
