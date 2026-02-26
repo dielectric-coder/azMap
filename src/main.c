@@ -17,6 +17,8 @@
 #include "text.h"
 #include "grid.h"
 #include "config.h"
+#include "solar.h"
+#include "nightmesh.h"
 
 #define DEFAULT_WIDTH  800
 #define DEFAULT_HEIGHT 800
@@ -261,6 +263,10 @@ int main(int argc, char **argv)
     grid.vertices = NULL;
     grid_build(&grid);
 
+    /* Night overlay */
+    NightMesh nightmesh;
+    nightmesh_init(&nightmesh);
+
     /* Upload geometry to GPU */
     renderer_upload_map(&renderer, &map);
     if (has_borders)
@@ -306,7 +312,7 @@ int main(int argc, char **argv)
         glfwPollEvents();
 
         /* Update marker size relative to zoom */
-        float ms = cam.zoom_km * 0.007f;
+        float ms = cam.zoom_km * 0.005f;
         renderer_upload_markers(&renderer, 0.0f, 0.0f, (float)tx, (float)ty, ms);
         renderer_upload_npole(&renderer, (float)npx, (float)npy, ms);
 
@@ -334,6 +340,19 @@ int main(int argc, char **argv)
 
         renderer_upload_labels(&renderer, label_verts, center_vcount + target_vcount, center_vcount);
 
+        /* Update night overlay periodically */
+        {
+            static time_t last_sun_update = 0;
+            time_t now = time(NULL);
+            if (now - last_sun_update >= 60) {
+                last_sun_update = now;
+                SubsolarPoint sun = solar_subsolar_point(now);
+                nightmesh_build(&nightmesh, &sun);
+                renderer_upload_night(&renderer, nightmesh.vertices,
+                                      nightmesh.vertex_count);
+            }
+        }
+
         renderer_draw(&renderer, mvp, fb_w, fb_h);
 
         glfwSwapBuffers(window);
@@ -344,6 +363,7 @@ int main(int argc, char **argv)
     map_data_free(&map);
     if (has_borders) map_data_free(&borders);
     free(grid.vertices);
+    nightmesh_free(&nightmesh);
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

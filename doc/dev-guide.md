@@ -13,13 +13,15 @@ src/
   projection.h/c    Azimuthal equidistant forward/inverse projection math
   map_data.h/c      Shapefile loading (shapelib), vertex arrays, reprojection
   grid.h/c          Center-based range/azimuth grid generation
+  solar.h/c         Subsolar point calculation from UTC time
+  nightmesh.h/c     Day/night overlay mesh generation (per-vertex alpha)
   renderer.h/c      OpenGL shader compilation, VAO/VBO management, draw calls
   camera.h/c        Orthographic view state (zoom, pan), MVP matrix
   input.h/c         GLFW callbacks: scroll, drag, keyboard
   text.h/c          Vector stroke font for on-screen text
 shaders/
-  map.vert          Vertex shader (MVP * position)
-  map.frag          Fragment shader (uniform color)
+  map.vert          Vertex shader (MVP * position, per-vertex alpha passthrough)
+  map.frag          Fragment shader (uniform color * vertex alpha)
 ```
 
 ### Coordinate System
@@ -44,18 +46,29 @@ Drawn back to front in `renderer_draw()`:
 
 | Order | Layer | Color | Draw Mode |
 |-------|-------|-------|-----------|
-| 1 | Earth boundary circle | Dark blue (0.15, 0.15, 0.3) | GL_LINE_LOOP |
-| 2 | Grid (range rings + radials) | Dim (0.2, 0.2, 0.3) | GL_LINE_STRIP |
-| 3 | Country borders | Gray (0.4, 0.4, 0.5) | GL_LINE_STRIP |
-| 4 | Coastlines | Green (0.2, 0.8, 0.3) | GL_LINE_STRIP |
-| 5 | Target line | Yellow (1.0, 0.9, 0.2) | GL_LINES |
-| 6 | Center marker | White (1.0, 1.0, 1.0) | GL_TRIANGLE_FAN |
-| 7 | Target marker | Red (1.0, 0.3, 0.2) | GL_LINE_LOOP |
-| 8 | North pole triangle | White (1.0, 1.0, 1.0) | GL_TRIANGLES |
-| 9 | Location labels | Cyan / Orange | GL_LINES (pixel-space) |
-| 10 | HUD text (dist/az) | White (1.0, 1.0, 1.0) | GL_LINES (pixel-space) |
+| 1 | Earth filled disc | Dark blue-gray (0.12, 0.12, 0.25) | GL_TRIANGLE_FAN |
+| 2 | Earth boundary circle | Dark blue (0.15, 0.15, 0.3) | GL_LINE_LOOP |
+| 3 | Grid (range rings + radials) | Dim (0.2, 0.2, 0.3) | GL_LINE_STRIP |
+| 4 | Night overlay | Dark (0.0, 0.0, 0.05) × per-vertex alpha | GL_TRIANGLES |
+| 5 | Country borders | Gray (0.4, 0.4, 0.5) | GL_LINE_STRIP |
+| 6 | Coastlines | Green (0.2, 0.8, 0.3) | GL_LINE_STRIP |
+| 7 | Target line | Yellow (1.0, 0.9, 0.2) | GL_LINES |
+| 8 | Center marker | White (1.0, 1.0, 1.0) | GL_TRIANGLE_FAN |
+| 9 | Target marker | Red (1.0, 0.3, 0.2) | GL_LINE_LOOP |
+| 10 | North pole triangle | White (1.0, 1.0, 1.0) | GL_TRIANGLES |
+| 11 | Location labels | Cyan / Orange | GL_LINES (pixel-space) |
+| 12 | HUD text (dist/az) | White (1.0, 1.0, 1.0) | GL_LINES (pixel-space) |
 
-Layers 9-10 use a pixel-space orthographic matrix (y-down) instead of the map MVP.
+Layers 11-12 use a pixel-space orthographic matrix (y-down) instead of the map MVP.
+
+### Day/Night Overlay
+
+The day/night system uses two new modules:
+
+- **`solar.c`** computes the subsolar point (latitude/longitude where the sun is directly overhead) from system UTC time using simplified astronomical formulas: solar declination from day-of-year and subsolar longitude from hour angle.
+- **`nightmesh.c`** generates a polar mesh (180 angular × 60 radial divisions) covering the Earth disc. For each vertex, `projection_inverse()` converts km-space back to lat/lon, then `solar_zenith_angle()` determines the sun angle. A smoothstep function maps zenith angle to per-vertex alpha: transparent at <=80° (full day), max opacity at >=108° (astronomical night).
+
+The mesh uses 3-component vertices (x, y, alpha). The vertex shader passes the alpha attribute to the fragment shader, which multiplies it with the uniform color alpha. All non-night geometry uses a default vertex alpha of 1.0 set via `glVertexAttrib1f(1, 1.0f)`. The mesh is regenerated every 60 seconds.
 
 ### Key Data Structures
 

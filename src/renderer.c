@@ -240,6 +240,30 @@ void renderer_upload_earth_circle(Renderer *r)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
     r->circle_vertex_count = n;
+
+    /* Filled disc (TRIANGLE_FAN: center + ring) */
+    int dn = n + 2;  /* center + n ring points + closing point */
+    float *dverts = malloc(dn * 2 * sizeof(float));
+    dverts[0] = 0.0f;
+    dverts[1] = 0.0f;
+    for (int i = 0; i <= n; i++) {
+        double a = 2.0 * M_PI * (i % n) / n;
+        dverts[(i + 1) * 2]     = (float)(radius * cos(a));
+        dverts[(i + 1) * 2 + 1] = (float)(radius * sin(a));
+    }
+    if (!r->disc_vao) {
+        glGenVertexArrays(1, &r->disc_vao);
+        glGenBuffers(1, &r->disc_vbo);
+    }
+    glBindVertexArray(r->disc_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->disc_vbo);
+    glBufferData(GL_ARRAY_BUFFER, dn * 2 * sizeof(float), dverts, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->disc_vertex_count = dn;
+    free(dverts);
+
     free(verts);
 }
 
@@ -262,6 +286,27 @@ void renderer_upload_grid(Renderer *r, const MapData *md)
         r->grid_segment_starts[i] = md->segment_starts[i];
         r->grid_segment_counts[i] = md->segment_counts[i];
     }
+}
+
+void renderer_upload_night(Renderer *r, const float *vertices, int vertex_count)
+{
+    if (!r->night_vao) {
+        glGenVertexArrays(1, &r->night_vao);
+        glGenBuffers(1, &r->night_vbo);
+    }
+    glBindVertexArray(r->night_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->night_vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertex_count * 3 * sizeof(float),
+                 vertices, GL_DYNAMIC_DRAW);
+    /* attribute 0: position (x, y) */
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+    /* attribute 1: alpha */
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float),
+                          (void *)(2 * sizeof(float)));
+    glBindVertexArray(0);
+    r->night_vertex_count = vertex_count;
 }
 
 void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int split)
@@ -303,16 +348,26 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
     glUseProgram(r->program);
     glUniformMatrix4fv(r->mvp_loc, 1, GL_FALSE, mvp);
 
+    /* Default vertex alpha = 1.0 for all geometry without per-vertex alpha */
+    glVertexAttrib1f(1, 1.0f);
+
+    /* Earth filled disc - slightly lighter base for day/night contrast */
+    if (r->disc_vao) {
+        glUniform4f(r->color_loc, 0.12f, 0.12f, 0.25f, 1.0f);
+        glBindVertexArray(r->disc_vao);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, r->disc_vertex_count);
+    }
+
     /* Earth boundary circle - dark blue */
     if (r->circle_vao) {
-        glUniform3f(r->color_loc, 0.15f, 0.15f, 0.3f);
+        glUniform4f(r->color_loc, 0.15f, 0.15f, 0.3f, 1.0f);
         glBindVertexArray(r->circle_vao);
         glDrawArrays(GL_LINE_LOOP, 0, r->circle_vertex_count);
     }
 
     /* Grid (graticule) - very dim */
     if (r->grid_vao) {
-        glUniform3f(r->color_loc, 0.2f, 0.2f, 0.3f);
+        glUniform4f(r->color_loc, 0.2f, 0.2f, 0.3f, 1.0f);
         glBindVertexArray(r->grid_vao);
         for (int i = 0; i < r->grid_num_segments; i++) {
             glDrawArrays(GL_LINE_STRIP,
@@ -321,9 +376,16 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         }
     }
 
+    /* Night overlay - smooth gradient via per-vertex alpha */
+    if (r->night_vao && r->night_vertex_count > 0) {
+        glUniform4f(r->color_loc, 0.0f, 0.0f, 0.05f, 1.0f);
+        glBindVertexArray(r->night_vao);
+        glDrawArrays(GL_TRIANGLES, 0, r->night_vertex_count);
+    }
+
     /* Country borders - dim gray */
     if (r->border_vao) {
-        glUniform3f(r->color_loc, 0.4f, 0.4f, 0.5f);
+        glUniform4f(r->color_loc, 0.4f, 0.4f, 0.5f, 1.0f);
         glBindVertexArray(r->border_vao);
         for (int i = 0; i < r->border_num_segments; i++) {
             glDrawArrays(GL_LINE_STRIP,
@@ -334,7 +396,7 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
 
     /* Coastlines - green */
     if (r->map_vao) {
-        glUniform3f(r->color_loc, 0.2f, 0.8f, 0.3f);
+        glUniform4f(r->color_loc, 0.2f, 0.8f, 0.3f, 1.0f);
         glBindVertexArray(r->map_vao);
         for (int i = 0; i < r->map_num_segments; i++) {
             glDrawArrays(GL_LINE_STRIP,
@@ -345,28 +407,28 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
 
     /* Target line - yellow */
     if (r->line_vao) {
-        glUniform3f(r->color_loc, 1.0f, 0.9f, 0.2f);
+        glUniform4f(r->color_loc, 1.0f, 0.9f, 0.2f, 1.0f);
         glBindVertexArray(r->line_vao);
         glDrawArrays(GL_LINES, 0, 2);
     }
 
     /* Center marker - white filled circle */
     if (r->center_marker_vao) {
-        glUniform3f(r->color_loc, 1.0f, 1.0f, 1.0f);
+        glUniform4f(r->color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
         glBindVertexArray(r->center_marker_vao);
         glDrawArrays(GL_TRIANGLE_FAN, 0, r->center_marker_vcount);
     }
 
     /* Target marker - red outline circle */
     if (r->target_marker_vao) {
-        glUniform3f(r->color_loc, 1.0f, 0.3f, 0.2f);
+        glUniform4f(r->color_loc, 1.0f, 0.3f, 0.2f, 1.0f);
         glBindVertexArray(r->target_marker_vao);
         glDrawArrays(GL_LINE_LOOP, 0, r->target_marker_vcount);
     }
 
     /* North pole triangle - white */
     if (r->npole_vao) {
-        glUniform3f(r->color_loc, 1.0f, 1.0f, 1.0f);
+        glUniform4f(r->color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
         glBindVertexArray(r->npole_vao);
         glDrawArrays(GL_TRIANGLES, 0, 3);
     }
@@ -387,19 +449,19 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         if (r->label_vao && r->label_vertex_count > 0) {
             glBindVertexArray(r->label_vao);
             if (r->label_split > 0) {
-                glUniform3f(r->color_loc, 0.3f, 1.0f, 1.0f);
+                glUniform4f(r->color_loc, 0.3f, 1.0f, 1.0f, 1.0f);
                 glDrawArrays(GL_LINES, 0, r->label_split);
             }
             int target_count = r->label_vertex_count - r->label_split;
             if (target_count > 0) {
-                glUniform3f(r->color_loc, 1.0f, 0.6f, 0.2f);
+                glUniform4f(r->color_loc, 1.0f, 0.6f, 0.2f, 1.0f);
                 glDrawArrays(GL_LINES, r->label_split, target_count);
             }
         }
 
         /* HUD text overlay */
         if (r->text_vao && r->text_vertex_count > 0) {
-            glUniform3f(r->color_loc, 1.0f, 1.0f, 1.0f);
+            glUniform4f(r->color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
             glBindVertexArray(r->text_vao);
             glDrawArrays(GL_LINES, 0, r->text_vertex_count);
         }
@@ -418,7 +480,9 @@ void renderer_destroy(Renderer *r)
     if (r->center_marker_vao) { glDeleteVertexArrays(1, &r->center_marker_vao); glDeleteBuffers(1, &r->center_marker_vbo); }
     if (r->target_marker_vao) { glDeleteVertexArrays(1, &r->target_marker_vao); glDeleteBuffers(1, &r->target_marker_vbo); }
     if (r->circle_vao) { glDeleteVertexArrays(1, &r->circle_vao); glDeleteBuffers(1, &r->circle_vbo); }
+    if (r->disc_vao) { glDeleteVertexArrays(1, &r->disc_vao); glDeleteBuffers(1, &r->disc_vbo); }
     if (r->grid_vao) { glDeleteVertexArrays(1, &r->grid_vao); glDeleteBuffers(1, &r->grid_vbo); }
+    if (r->night_vao) { glDeleteVertexArrays(1, &r->night_vao); glDeleteBuffers(1, &r->night_vbo); }
     if (r->text_vao) { glDeleteVertexArrays(1, &r->text_vao); glDeleteBuffers(1, &r->text_vbo); }
     if (r->label_vao) { glDeleteVertexArrays(1, &r->label_vao); glDeleteBuffers(1, &r->label_vbo); }
 }

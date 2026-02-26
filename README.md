@@ -17,6 +17,7 @@ Interactive azimuthal equidistant map projection viewer. Given a center location
 - Center-based range/azimuth grid (concentric rings every 5000 km, radial lines every 30 degrees)
 - Named location labels (optional `-c` / `-t` flags)
 - North pole indicator triangle
+- Real-time day/night overlay with smooth twilight gradient (civil, nautical, astronomical)
 - Smooth zoom (10 km to full Earth) and pan
 - Vector stroke font for all text (no external font dependencies)
 

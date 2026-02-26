@@ -45,12 +45,22 @@ typedef struct {
     unsigned int circle_vbo;
     int          circle_vertex_count;
 
+    /* Earth filled disc (day-side base) */
+    unsigned int disc_vao;
+    unsigned int disc_vbo;
+    int          disc_vertex_count;
+
     /* Grid (graticule) */
     unsigned int grid_vao;
     unsigned int grid_vbo;
     int          grid_segment_starts[MAX_SEGMENTS];
     int          grid_segment_counts[MAX_SEGMENTS];
     int          grid_num_segments;
+
+    /* Night overlay (filled triangles with per-vertex alpha, km-space) */
+    unsigned int night_vao;
+    unsigned int night_vbo;
+    int          night_vertex_count;
 
     /* Text overlay (pixel-space, HUD) */
     unsigned int text_vao;
@@ -87,6 +97,9 @@ void renderer_upload_earth_circle(Renderer *r);
 
 /* Upload grid (graticule) data to GPU. */
 void renderer_upload_grid(Renderer *r, const MapData *md);
+
+/* Upload night overlay mesh (GL_TRIANGLES, 3 floats per vertex: x, y, alpha). */
+void renderer_upload_night(Renderer *r, const float *vertices, int vertex_count);
 
 /* Upload text overlay vertices (pixel-space GL_LINES). */
 void renderer_upload_text(Renderer *r, float *verts, int vertex_count);

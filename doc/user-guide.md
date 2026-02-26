@@ -120,6 +120,7 @@ For backward compatibility, a bare fifth positional argument is also accepted as
 - **White filled circle** - Center location marker
 - **Red outline circle** - Target location marker
 - **White triangle** - North pole indicator
+- **Dark overlay** - Night side of the Earth with smooth twilight gradient (updates every 60 seconds from system UTC time)
 
 ### Text Overlays
 

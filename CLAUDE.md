@@ -75,20 +75,24 @@ src/
 ├── projection.h/c  Azimuthal equidistant forward/inverse projection math
 ├── map_data.h/c    Shapefile loading (shapelib), vertex array management, reprojection
 ├── grid.h/c        Center-based range/azimuth grid (concentric rings + radial lines)
+├── solar.h/c       Subsolar point calculation from UTC time
+├── nightmesh.h/c   Day/night overlay mesh generation (per-vertex alpha)
 ├── renderer.h/c    OpenGL shader compilation, VAO/VBO management, draw calls
 ├── camera.h/c      Orthographic view state (zoom_km, pan offset), MVP matrix
 ├── input.h/c       GLFW callbacks: scroll→zoom, drag→pan, keyboard shortcuts
 └── text.h/c        Vector stroke font for on-screen text (distance/azimuth overlay)
 shaders/
-├── map.vert        Vertex shader (MVP transform on 2D positions)
-└── map.frag        Fragment shader (uniform color per draw call)
+├── map.vert        Vertex shader (MVP transform + per-vertex alpha passthrough)
+└── map.frag        Fragment shader (uniform color * vertex alpha)
 ```
 
 **Coordinate system**: The projection outputs x,y in kilometers from the center point. The camera builds an orthographic matrix mapping km-space to clip space. `zoom_km` controls the visible diameter (10–40030 km).
 
 **Data flow**: Shapefiles are loaded once → raw lat/lon stored in `map_data.c` statics → projected to km via `projection_forward()` → uploaded to GPU as VBOs → drawn as `GL_LINE_STRIP` segments per polyline. Grid geometry is generated procedurally in km-space.
 
-**Rendering layers** (drawn back to front): Earth boundary circle (dark blue) → grid rings+radials (dim) → country borders (gray) → coastlines (green) → target line (yellow) → center marker (white filled circle) → target marker (red outline circle) → north pole triangle (white) → location labels (cyan/orange, pixel-space) → HUD text overlay (white, pixel-space).
+**Rendering layers** (drawn back to front): Earth filled disc (dark blue-gray) → Earth boundary circle (dark blue) → grid rings+radials (dim) → night overlay (semi-transparent, smooth gradient) → country borders (gray) → coastlines (green) → target line (yellow) → center marker (white filled circle) → target marker (red outline circle) → north pole triangle (white) → location labels (cyan/orange, pixel-space) → HUD text overlay (white, pixel-space).
+
+**Day/night overlay**: `solar.c` computes the subsolar point from system UTC time. `nightmesh.c` generates a polar mesh (180x60) covering the Earth disc; each vertex gets a per-vertex alpha based on solar zenith angle using a smoothstep function (transparent at zenith<=80°, max opacity at zenith>=108°). The mesh is regenerated every 60 seconds. The vertex shader passes per-vertex alpha to the fragment shader, which multiplies it with the uniform color alpha. Non-night geometry uses a default vertex alpha of 1.0 via `glVertexAttrib1f(1, 1.0f)`.
 
 **Text rendering**: Uses a built-in vector stroke font (`text.c`) — characters are defined as line segments, rendered with GL_LINES using the same shader. No external font dependencies.
 
