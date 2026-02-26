@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-azMap is a C application that renders an interactive azimuthal equidistant map projection using OpenGL. Given a center lat/lon, it projects the world map and draws a line to a target location.
+azMap is a C application that renders an interactive azimuthal equidistant map projection using OpenGL. Given a center lat/lon, it projects the world map and draws a line to a target location, showing distance and azimuth information.
 
 ## Build
 
@@ -22,11 +22,19 @@ mkdir -p build && cd build && cmake .. && make
 
 ```bash
 # From the build directory
-./azmap <center_lat> <center_lon> <target_lat> <target_lon> [shapefile_path]
+./azmap <center_lat> <center_lon> <target_lat> <target_lon> [options]
 
 # Example: center on Madrid, line to Paris
-./azmap 40.4168 -3.7038 48.8566 2.3522
+./azmap 40.4168 -3.7038 48.8566 2.3522 -c Madrid -t Paris
 ```
+
+### Options
+
+- `-c NAME` — Center location name (displayed as label)
+- `-t NAME` — Target location name (displayed as label)
+- `-s PATH` — Shapefile path override
+
+For backward compatibility, a bare fifth argument is still accepted as the shapefile path.
 
 ### Map data (Natural Earth 110m)
 
@@ -45,9 +53,10 @@ Download and extract into `data/`:
 
 ```
 src/
-├── main.c          Entry point, GLFW window, main loop, CLI arg parsing
+├── main.c          Entry point, GLFW window, main loop, CLI arg parsing, label building
 ├── projection.h/c  Azimuthal equidistant forward/inverse projection math
 ├── map_data.h/c    Shapefile loading (shapelib), vertex array management, reprojection
+├── grid.h/c        Center-based range/azimuth grid (concentric rings + radial lines)
 ├── renderer.h/c    OpenGL shader compilation, VAO/VBO management, draw calls
 ├── camera.h/c      Orthographic view state (zoom_km, pan offset), MVP matrix
 ├── input.h/c       GLFW callbacks: scroll→zoom, drag→pan, keyboard shortcuts
@@ -59,8 +68,10 @@ shaders/
 
 **Coordinate system**: The projection outputs x,y in kilometers from the center point. The camera builds an orthographic matrix mapping km-space to clip space. `zoom_km` controls the visible diameter (10–40030 km).
 
-**Data flow**: Shapefiles are loaded once → raw lat/lon stored in `map_data.c` statics → projected to km via `projection_forward()` → uploaded to GPU as VBOs → drawn as `GL_LINE_STRIP` segments per polyline.
+**Data flow**: Shapefiles are loaded once → raw lat/lon stored in `map_data.c` statics → projected to km via `projection_forward()` → uploaded to GPU as VBOs → drawn as `GL_LINE_STRIP` segments per polyline. Grid geometry is generated procedurally in km-space.
 
-**Rendering layers** (drawn back to front): Earth boundary circle (dark blue) → country borders (gray) → coastlines (green) → target line (yellow) → crosshair markers (white=center, red=target) → text overlay (white, pixel-space ortho matrix).
+**Rendering layers** (drawn back to front): Earth boundary circle (dark blue) → grid rings+radials (dim) → country borders (gray) → coastlines (green) → target line (yellow) → center marker (white filled circle) → target marker (red outline circle) → north pole triangle (white) → location labels (cyan/orange, pixel-space) → HUD text overlay (white, pixel-space).
 
 **Text rendering**: Uses a built-in vector stroke font (`text.c`) — characters are defined as line segments, rendered with GL_LINES using the same shader. No external font dependencies.
+
+**Labels**: Location labels are rebuilt each frame by projecting marker km-positions through the MVP to screen coordinates, then rendered in pixel-space. The center label is cyan and the target label is orange.

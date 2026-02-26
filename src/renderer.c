@@ -148,21 +148,71 @@ void renderer_upload_target_line(Renderer *r, float cx, float cy, float tx, floa
 
 void renderer_upload_markers(Renderer *r, float cx, float cy, float tx, float ty, float size_km)
 {
+    #define MARKER_SEGS 32
     float s = size_km;
-    float verts[] = {
-        /* Center crosshair */
-        cx - s, cy,     cx + s, cy,
-        cx,     cy - s, cx,     cy + s,
-        /* Target crosshair */
-        tx - s, ty,     tx + s, ty,
-        tx,     ty - s, tx,     ty + s,
-    };
-    if (!r->marker_vao) {
-        glGenVertexArrays(1, &r->marker_vao);
-        glGenBuffers(1, &r->marker_vbo);
+
+    /* Center: filled circle (triangle fan: center + ring + closing vertex) */
+    {
+        int n = MARKER_SEGS + 2;
+        float verts[(MARKER_SEGS + 2) * 2];
+        verts[0] = cx;
+        verts[1] = cy;
+        for (int i = 0; i <= MARKER_SEGS; i++) {
+            float a = 2.0f * (float)M_PI * i / MARKER_SEGS;
+            verts[(i + 1) * 2]     = cx + s * cosf(a);
+            verts[(i + 1) * 2 + 1] = cy + s * sinf(a);
+        }
+        if (!r->center_marker_vao) {
+            glGenVertexArrays(1, &r->center_marker_vao);
+            glGenBuffers(1, &r->center_marker_vbo);
+        }
+        glBindVertexArray(r->center_marker_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, r->center_marker_vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(float) * n * 2, verts, GL_DYNAMIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+        glBindVertexArray(0);
+        r->center_marker_vcount = n;
     }
-    glBindVertexArray(r->marker_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, r->marker_vbo);
+
+    /* Target: outline circle (line loop) */
+    {
+        float verts[MARKER_SEGS * 2];
+        for (int i = 0; i < MARKER_SEGS; i++) {
+            float a = 2.0f * (float)M_PI * i / MARKER_SEGS;
+            verts[i * 2]     = tx + s * cosf(a);
+            verts[i * 2 + 1] = ty + s * sinf(a);
+        }
+        if (!r->target_marker_vao) {
+            glGenVertexArrays(1, &r->target_marker_vao);
+            glGenBuffers(1, &r->target_marker_vbo);
+        }
+        glBindVertexArray(r->target_marker_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, r->target_marker_vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(float) * MARKER_SEGS * 2, verts, GL_DYNAMIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+        glBindVertexArray(0);
+        r->target_marker_vcount = MARKER_SEGS;
+    }
+    #undef MARKER_SEGS
+}
+
+void renderer_upload_npole(Renderer *r, float px, float py, float size_km)
+{
+    float s = size_km;
+    /* Upward-pointing triangle */
+    float verts[] = {
+        px,         py - s,       /* top */
+        px - s * 0.866f, py + s * 0.5f, /* bottom-left */
+        px + s * 0.866f, py + s * 0.5f, /* bottom-right */
+    };
+    if (!r->npole_vao) {
+        glGenVertexArrays(1, &r->npole_vao);
+        glGenBuffers(1, &r->npole_vbo);
+    }
+    glBindVertexArray(r->npole_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->npole_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
@@ -191,6 +241,44 @@ void renderer_upload_earth_circle(Renderer *r)
     glBindVertexArray(0);
     r->circle_vertex_count = n;
     free(verts);
+}
+
+void renderer_upload_grid(Renderer *r, const MapData *md)
+{
+    if (!r->grid_vao) {
+        glGenVertexArrays(1, &r->grid_vao);
+        glGenBuffers(1, &r->grid_vbo);
+    }
+    glBindVertexArray(r->grid_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->grid_vbo);
+    glBufferData(GL_ARRAY_BUFFER, md->vertex_count * 2 * sizeof(float),
+                 md->vertices, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+
+    r->grid_num_segments = md->num_segments;
+    for (int i = 0; i < md->num_segments; i++) {
+        r->grid_segment_starts[i] = md->segment_starts[i];
+        r->grid_segment_counts[i] = md->segment_counts[i];
+    }
+}
+
+void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int split)
+{
+    if (!r->label_vao) {
+        glGenVertexArrays(1, &r->label_vao);
+        glGenBuffers(1, &r->label_vbo);
+    }
+    glBindVertexArray(r->label_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->label_vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertex_count * 2 * sizeof(float),
+                 verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->label_vertex_count = vertex_count;
+    r->label_split = split;
 }
 
 void renderer_upload_text(Renderer *r, float *verts, int vertex_count)
@@ -222,6 +310,17 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glDrawArrays(GL_LINE_LOOP, 0, r->circle_vertex_count);
     }
 
+    /* Grid (graticule) - very dim */
+    if (r->grid_vao) {
+        glUniform3f(r->color_loc, 0.2f, 0.2f, 0.3f);
+        glBindVertexArray(r->grid_vao);
+        for (int i = 0; i < r->grid_num_segments; i++) {
+            glDrawArrays(GL_LINE_STRIP,
+                         r->grid_segment_starts[i],
+                         r->grid_segment_counts[i]);
+        }
+    }
+
     /* Country borders - dim gray */
     if (r->border_vao) {
         glUniform3f(r->color_loc, 0.4f, 0.4f, 0.5f);
@@ -251,17 +350,29 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glDrawArrays(GL_LINES, 0, 2);
     }
 
-    /* Markers - white for center, red for target */
-    if (r->marker_vao) {
-        glBindVertexArray(r->marker_vao);
+    /* Center marker - white filled circle */
+    if (r->center_marker_vao) {
         glUniform3f(r->color_loc, 1.0f, 1.0f, 1.0f);
-        glDrawArrays(GL_LINES, 0, 4);
-        glUniform3f(r->color_loc, 1.0f, 0.3f, 0.2f);
-        glDrawArrays(GL_LINES, 4, 4);
+        glBindVertexArray(r->center_marker_vao);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, r->center_marker_vcount);
     }
 
-    /* Text overlay — switch to pixel-space orthographic matrix */
-    if (r->text_vao && r->text_vertex_count > 0 && fb_w > 0 && fb_h > 0) {
+    /* Target marker - red outline circle */
+    if (r->target_marker_vao) {
+        glUniform3f(r->color_loc, 1.0f, 0.3f, 0.2f);
+        glBindVertexArray(r->target_marker_vao);
+        glDrawArrays(GL_LINE_LOOP, 0, r->target_marker_vcount);
+    }
+
+    /* North pole triangle - white */
+    if (r->npole_vao) {
+        glUniform3f(r->color_loc, 1.0f, 1.0f, 1.0f);
+        glBindVertexArray(r->npole_vao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+
+    /* Pixel-space overlays — switch to pixel-space orthographic matrix */
+    if (fb_w > 0 && fb_h > 0) {
         float ortho[16];
         memset(ortho, 0, sizeof(ortho));
         ortho[0]  = 2.0f / (float)fb_w;
@@ -272,9 +383,26 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         ortho[15] = 1.0f;
         glUniformMatrix4fv(r->mvp_loc, 1, GL_FALSE, ortho);
 
-        glUniform3f(r->color_loc, 1.0f, 1.0f, 1.0f);
-        glBindVertexArray(r->text_vao);
-        glDrawArrays(GL_LINES, 0, r->text_vertex_count);
+        /* Labels (center = cyan, target = orange) */
+        if (r->label_vao && r->label_vertex_count > 0) {
+            glBindVertexArray(r->label_vao);
+            if (r->label_split > 0) {
+                glUniform3f(r->color_loc, 0.3f, 1.0f, 1.0f);
+                glDrawArrays(GL_LINES, 0, r->label_split);
+            }
+            int target_count = r->label_vertex_count - r->label_split;
+            if (target_count > 0) {
+                glUniform3f(r->color_loc, 1.0f, 0.6f, 0.2f);
+                glDrawArrays(GL_LINES, r->label_split, target_count);
+            }
+        }
+
+        /* HUD text overlay */
+        if (r->text_vao && r->text_vertex_count > 0) {
+            glUniform3f(r->color_loc, 1.0f, 1.0f, 1.0f);
+            glBindVertexArray(r->text_vao);
+            glDrawArrays(GL_LINES, 0, r->text_vertex_count);
+        }
     }
 
     glBindVertexArray(0);
@@ -286,7 +414,11 @@ void renderer_destroy(Renderer *r)
     if (r->map_vao) { glDeleteVertexArrays(1, &r->map_vao); glDeleteBuffers(1, &r->map_vbo); }
     if (r->border_vao) { glDeleteVertexArrays(1, &r->border_vao); glDeleteBuffers(1, &r->border_vbo); }
     if (r->line_vao) { glDeleteVertexArrays(1, &r->line_vao); glDeleteBuffers(1, &r->line_vbo); }
-    if (r->marker_vao) { glDeleteVertexArrays(1, &r->marker_vao); glDeleteBuffers(1, &r->marker_vbo); }
+    if (r->npole_vao) { glDeleteVertexArrays(1, &r->npole_vao); glDeleteBuffers(1, &r->npole_vbo); }
+    if (r->center_marker_vao) { glDeleteVertexArrays(1, &r->center_marker_vao); glDeleteBuffers(1, &r->center_marker_vbo); }
+    if (r->target_marker_vao) { glDeleteVertexArrays(1, &r->target_marker_vao); glDeleteBuffers(1, &r->target_marker_vbo); }
     if (r->circle_vao) { glDeleteVertexArrays(1, &r->circle_vao); glDeleteBuffers(1, &r->circle_vbo); }
+    if (r->grid_vao) { glDeleteVertexArrays(1, &r->grid_vao); glDeleteBuffers(1, &r->grid_vbo); }
     if (r->text_vao) { glDeleteVertexArrays(1, &r->text_vao); glDeleteBuffers(1, &r->text_vbo); }
+    if (r->label_vao) { glDeleteVertexArrays(1, &r->label_vao); glDeleteBuffers(1, &r->label_vbo); }
 }

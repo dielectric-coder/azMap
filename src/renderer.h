@@ -26,19 +26,42 @@ typedef struct {
     unsigned int line_vao;
     unsigned int line_vbo;
 
-    /* Markers (center + target crosshairs) */
-    unsigned int marker_vao;
-    unsigned int marker_vbo;
+    /* Center marker (filled circle — GL_TRIANGLE_FAN) */
+    unsigned int center_marker_vao;
+    unsigned int center_marker_vbo;
+    int          center_marker_vcount;
+
+    /* Target marker (outline circle — GL_LINE_LOOP) */
+    unsigned int target_marker_vao;
+    unsigned int target_marker_vbo;
+    int          target_marker_vcount;
+
+    /* North pole triangle (filled) */
+    unsigned int npole_vao;
+    unsigned int npole_vbo;
 
     /* Earth boundary circle */
     unsigned int circle_vao;
     unsigned int circle_vbo;
     int          circle_vertex_count;
 
-    /* Text overlay */
+    /* Grid (graticule) */
+    unsigned int grid_vao;
+    unsigned int grid_vbo;
+    int          grid_segment_starts[MAX_SEGMENTS];
+    int          grid_segment_counts[MAX_SEGMENTS];
+    int          grid_num_segments;
+
+    /* Text overlay (pixel-space, HUD) */
     unsigned int text_vao;
     unsigned int text_vbo;
     int          text_vertex_count;
+
+    /* Labels (pixel-space, positioned at marker screen coords) */
+    unsigned int label_vao;
+    unsigned int label_vbo;
+    int          label_vertex_count;
+    int          label_split;  /* vertex index where center label ends / target begins */
 } Renderer;
 
 /* Initialize shaders and GL state. Returns 0 on success. */
@@ -53,14 +76,24 @@ void renderer_upload_borders(Renderer *r, const MapData *md);
 /* Upload target line (two endpoints in km). */
 void renderer_upload_target_line(Renderer *r, float cx, float cy, float tx, float ty);
 
-/* Upload crosshair markers at center and target. */
+/* Upload markers: filled circle at center, outline circle at target. */
 void renderer_upload_markers(Renderer *r, float cx, float cy, float tx, float ty, float size_km);
+
+/* Upload north pole triangle marker (km-space position + size). */
+void renderer_upload_npole(Renderer *r, float px, float py, float size_km);
 
 /* Upload Earth boundary circle. */
 void renderer_upload_earth_circle(Renderer *r);
 
+/* Upload grid (graticule) data to GPU. */
+void renderer_upload_grid(Renderer *r, const MapData *md);
+
 /* Upload text overlay vertices (pixel-space GL_LINES). */
 void renderer_upload_text(Renderer *r, float *verts, int vertex_count);
+
+/* Upload label vertices (pixel-space GL_LINES).
+ * split: vertex index where center label ends and target label begins. */
+void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int split);
 
 /* Draw everything. fb_w/fb_h needed for text overlay. */
 void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h);

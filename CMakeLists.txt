@@ -27,6 +27,7 @@ add_executable(azmap
     src/camera.c
     src/input.c
     src/text.c
+    src/grid.c
 )
 
 target_include_directories(azmap PRIVATE

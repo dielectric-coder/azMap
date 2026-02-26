@@ -4,6 +4,7 @@
 #include <libgen.h>
 #include <limits.h>
 #include <unistd.h>
+#include <math.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
@@ -13,6 +14,7 @@
 #include "camera.h"
 #include "input.h"
 #include "text.h"
+#include "grid.h"
 
 #define DEFAULT_WIDTH  800
 #define DEFAULT_HEIGHT 800
@@ -30,14 +32,54 @@ static void resolve_path(const char *exe, const char *rel, char *out, size_t out
     snprintf(out, out_size, "%s/../%s", dir, rel);
 }
 
+/* Format a coordinate as "12.34N" or "12.34S" / "1.23E" or "1.23W" */
+static int format_coord(char *buf, size_t sz, double lat, double lon)
+{
+    char ns = lat >= 0 ? 'N' : 'S';
+    char ew = lon >= 0 ? 'E' : 'W';
+    return snprintf(buf, sz, "%.2f%c, %.2f%c", fabs(lat), ns, fabs(lon), ew);
+}
+
+/* Build a label string: "Name (12.34N, 1.23W)" or just "12.34N, 1.23W" */
+static void build_label(char *buf, size_t sz, const char *name, double lat, double lon)
+{
+    char coord[64];
+    format_coord(coord, sizeof(coord), lat, lon);
+    if (name && name[0])
+        snprintf(buf, sz, "%s (%s)", name, coord);
+    else
+        snprintf(buf, sz, "%s", coord);
+}
+
+/* Transform a km-space point through MVP to get pixel coords.
+ * mvp is column-major 4x4. Returns pixel x,y (origin top-left). */
+static void km_to_pixel(const float *mvp, float kx, float ky,
+                         int fb_w, int fb_h, float *px, float *py)
+{
+    /* clip = MVP * (kx, ky, 0, 1) */
+    float cx = mvp[0]*kx + mvp[4]*ky + mvp[12];
+    float cy = mvp[1]*kx + mvp[5]*ky + mvp[13];
+    float cw = mvp[3]*kx + mvp[7]*ky + mvp[15];
+    /* NDC */
+    float nx = cx / cw;
+    float ny = cy / cw;
+    /* pixel (y-down for text system) */
+    *px = (nx * 0.5f + 0.5f) * (float)fb_w;
+    *py = (-ny * 0.5f + 0.5f) * (float)fb_h;
+}
+
 static void print_usage(const char *prog)
 {
     fprintf(stderr,
-        "Usage: %s <center_lat> <center_lon> <target_lat> <target_lon> [shapefile]\n"
+        "Usage: %s <center_lat> <center_lon> <target_lat> <target_lon> [options]\n"
         "\n"
         "  center_lat/lon  Center of azimuthal equidistant projection (degrees)\n"
         "  target_lat/lon  Second location to draw a line to (degrees)\n"
-        "  shapefile       Path to .shp file (default: %s)\n"
+        "\n"
+        "Options:\n"
+        "  -c NAME    Center location name\n"
+        "  -t NAME    Target location name\n"
+        "  -s PATH    Shapefile path override (default: %s)\n"
         "\n"
         "Controls:\n"
         "  Scroll       Zoom in/out\n"
@@ -60,6 +102,30 @@ int main(int argc, char **argv)
     double target_lat = atof(argv[3]);
     double target_lon = atof(argv[4]);
 
+    const char *center_name = NULL;
+    const char *target_name = NULL;
+    const char *shp_override = NULL;
+
+    /* Parse optional flags after the 4 positional args */
+    int i = 5;
+    while (i < argc) {
+        if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
+            center_name = argv[++i];
+        } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
+            target_name = argv[++i];
+        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+            shp_override = argv[++i];
+        } else if (argv[i][0] != '-' && !shp_override) {
+            /* Backward compat: bare arg = shapefile path */
+            shp_override = argv[i];
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            print_usage(argv[0]);
+            return 1;
+        }
+        i++;
+    }
+
     /* Resolve default paths relative to executable location */
     char exe_path[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
@@ -75,7 +141,7 @@ int main(int argc, char **argv)
     resolve_path(exe_path, DEFAULT_BORDER_REL, default_border, sizeof(default_border));
     resolve_path(exe_path, DEFAULT_SHADER_REL, shader_dir, sizeof(shader_dir));
 
-    const char *shp_path = (argc > 5) ? argv[5] : default_shp;
+    const char *shp_path = shp_override ? shp_override : default_shp;
 
     /* Set up projection */
     projection_set_center(center_lat, center_lon);
@@ -85,11 +151,18 @@ int main(int argc, char **argv)
     projection_forward(target_lat, target_lon, &tx, &ty);
 
     double dist = projection_distance(center_lat, center_lon, target_lat, target_lon);
-    double az = projection_azimuth(center_lat, center_lon, target_lat, target_lon);
+    double az_to = projection_azimuth(center_lat, center_lon, target_lat, target_lon);
+    double az_from = projection_azimuth(target_lat, target_lon, center_lat, center_lon);
     printf("Center:   %.4f, %.4f\n", center_lat, center_lon);
     printf("Target:   %.4f, %.4f\n", target_lat, target_lon);
     printf("Distance: %.1f km\n", dist);
-    printf("Azimuth:  %.1f deg\n", az);
+    printf("Az to:    %.1f deg\n", az_to);
+    printf("Az from:  %.1f deg\n", az_from);
+
+    /* Build label strings */
+    char center_label[128], target_label[128];
+    build_label(center_label, sizeof(center_label), center_name, center_lat, center_lon);
+    build_label(target_label, sizeof(target_label), target_name, target_lat, target_lon);
 
     /* Init GLFW */
     if (!glfwInit()) {
@@ -145,19 +218,29 @@ int main(int argc, char **argv)
     if (!has_borders)
         printf("Note: country borders not found, skipping. Download ne_110m_admin_0_boundary_lines_land.\n");
 
+    /* Build grid (graticule) */
+    MapData grid;
+    grid.vertices = NULL;
+    grid_build(&grid);
+
     /* Upload geometry to GPU */
     renderer_upload_map(&renderer, &map);
     if (has_borders)
         renderer_upload_borders(&renderer, &borders);
+    renderer_upload_grid(&renderer, &grid);
     renderer_upload_target_line(&renderer, 0.0f, 0.0f, (float)tx, (float)ty);
     renderer_upload_earth_circle(&renderer);
 
+    /* North pole marker */
+    double npx, npy;
+    projection_forward(90.0, 0.0, &npx, &npy);
+
     /* Build text overlay */
     text_init();
-    char info_text[128];
-    snprintf(info_text, sizeof(info_text), "Dist: %.1f km  Az: %.1f^", dist, az);
+    char info_text[192];
+    snprintf(info_text, sizeof(info_text), "Dist: %.1f km  Az to: %.1f^  Az from: %.1f^", dist, az_to, az_from);
     float text_verts[4096];
-    int text_vcount = text_build(info_text, 10.0f, 10.0f, 20.0f, text_verts, 2048);
+    int text_vcount = text_build(info_text, 16.0f, 16.0f, 20.0f, text_verts, 2048);
     renderer_upload_text(&renderer, text_verts, text_vcount);
 
     /* Camera — use actual framebuffer size (differs from window size on HiDPI) */
@@ -177,18 +260,42 @@ int main(int argc, char **argv)
     InputState input;
     input_init(&input, window, &cam);
 
+    /* Label vertex buffer (rebuilt each frame) */
+    float label_verts[8192];
+
     /* Main loop */
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
         /* Update marker size relative to zoom */
-        float ms = cam.zoom_km * 0.015f;
+        float ms = cam.zoom_km * 0.007f;
         renderer_upload_markers(&renderer, 0.0f, 0.0f, (float)tx, (float)ty, ms);
+        renderer_upload_npole(&renderer, (float)npx, (float)npy, ms);
 
         glfwGetFramebufferSize(window, &fb_w, &fb_h);
 
         float mvp[16];
         camera_get_mvp(&cam, mvp);
+
+        /* Build labels at screen positions of center and target markers */
+        float label_size = 14.0f;
+        float cpx, cpy, tpx, tpy;
+        km_to_pixel(mvp, 0.0f, 0.0f, fb_w, fb_h, &cpx, &cpy);
+        km_to_pixel(mvp, (float)tx, (float)ty, fb_w, fb_h, &tpx, &tpy);
+
+        /* Center label: offset below center crosshair */
+        int center_vcount = text_build(center_label,
+            cpx - (float)strlen(center_label) * label_size * 0.35f * 0.5f,
+            cpy + label_size * 0.8f,
+            label_size, label_verts, 4096);
+        /* Target label: offset below target crosshair */
+        int target_vcount = text_build(target_label,
+            tpx - (float)strlen(target_label) * label_size * 0.35f * 0.5f,
+            tpy + label_size * 0.8f,
+            label_size, label_verts + center_vcount * 2, 4096 - center_vcount);
+
+        renderer_upload_labels(&renderer, label_verts, center_vcount + target_vcount, center_vcount);
+
         renderer_draw(&renderer, mvp, fb_w, fb_h);
 
         glfwSwapBuffers(window);
@@ -198,6 +305,7 @@ int main(int argc, char **argv)
     renderer_destroy(&renderer);
     map_data_free(&map);
     if (has_borders) map_data_free(&borders);
+    free(grid.vertices);
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
