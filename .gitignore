@@ -1,0 +1,4 @@
+build/
+data/ne_110m_*/
+*.o
+*.d
