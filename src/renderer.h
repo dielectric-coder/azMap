@@ -72,6 +72,31 @@ typedef struct {
     unsigned int label_vbo;
     int          label_vertex_count;
     int          label_split;  /* vertex index where center label ends / target begins */
+
+    /* Label backgrounds (pixel-space, semi-transparent quads behind labels) */
+    unsigned int label_bg_vao;
+    unsigned int label_bg_vbo;
+    int          label_bg_split;  /* vertex index where center bg ends / target begins */
+    int          label_bg_vertex_count;
+
+    /* UI buttons (pixel-space) */
+    unsigned int btn_bg_vao;
+    unsigned int btn_bg_vbo;
+    int          btn_bg_vertex_count;
+    unsigned int btn_text_vao;
+    unsigned int btn_text_vbo;
+    int          btn_text_vertex_count;
+    int          btn_count;        /* number of visible buttons */
+    int          btn_hovered_quad; /* visible-button index of hovered button (-1 = none) */
+
+    /* Popup panel (pixel-space) */
+    unsigned int popup_bg_vao;
+    unsigned int popup_bg_vbo;
+    int          popup_bg_vertex_count;   /* GL_TRIANGLES */
+    unsigned int popup_text_vao;
+    unsigned int popup_text_vbo;
+    int          popup_text_vertex_count; /* GL_LINES */
+    int          popup_close_hovered;
 } Renderer;
 
 /* Initialize shaders and GL state. Returns 0 on success. */
@@ -92,8 +117,8 @@ void renderer_upload_markers(Renderer *r, float cx, float cy, float tx, float ty
 /* Upload north pole triangle marker (km-space position + size). */
 void renderer_upload_npole(Renderer *r, float px, float py, float size_km);
 
-/* Upload Earth boundary circle. */
-void renderer_upload_earth_circle(Renderer *r);
+/* Upload Earth boundary circle and filled disc for the given radius. */
+void renderer_upload_earth_circle(Renderer *r, double radius);
 
 /* Upload grid (graticule) data to GPU. */
 void renderer_upload_grid(Renderer *r, const MapData *md);
@@ -107,6 +132,26 @@ void renderer_upload_text(Renderer *r, float *verts, int vertex_count);
 /* Upload label vertices (pixel-space GL_LINES).
  * split: vertex index where center label ends and target label begins. */
 void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int split);
+
+/* Upload label background quads (pixel-space GL_TRIANGLES).
+ * split: vertex index where center bg ends and target bg begins. */
+void renderer_upload_label_bgs(Renderer *r, float *verts, int vertex_count, int split);
+
+/* Upload UI button geometry (pixel-space).
+ * quad_verts: GL_TRIANGLES background quads, text_verts: GL_LINES label text.
+ * btn_count: number of visible buttons, hovered_quad: which one is hovered (-1 = none). */
+void renderer_upload_buttons(Renderer *r,
+                             float *quad_verts, int quad_vert_count,
+                             float *text_verts, int text_vert_count,
+                             int btn_count, int hovered_quad);
+
+/* Upload popup panel geometry (pixel-space).
+ * quad_verts: 3 quads (body, title bar, close btn) as GL_TRIANGLES.
+ * text_verts: title + "X" as GL_LINES. close_hovered: highlight close btn. */
+void renderer_upload_popup(Renderer *r,
+                           float *quad_verts, int quad_vert_count,
+                           float *text_verts, int text_vert_count,
+                           int close_hovered);
 
 /* Draw everything. fb_w/fb_h needed for text overlay. */
 void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h);

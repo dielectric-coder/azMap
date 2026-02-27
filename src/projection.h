@@ -5,7 +5,16 @@
 #define EARTH_CIRCUMFERENCE_KM (2.0 * M_PI * EARTH_RADIUS_KM)
 #define EARTH_MAX_PROJ_RADIUS (M_PI * EARTH_RADIUS_KM)  /* ~20015 km */
 
-/* Set the center point of the azimuthal equidistant projection (degrees). */
+typedef enum { PROJ_AZEQ, PROJ_ORTHO } ProjMode;
+
+/* Set/get projection mode (azimuthal equidistant or orthographic). */
+void projection_set_mode(ProjMode mode);
+ProjMode projection_get_mode(void);
+
+/* Earth radius in projected km-space for the current mode. */
+double projection_get_radius(void);
+
+/* Set the center point of the projection (degrees). */
 void projection_set_center(double lat_deg, double lon_deg);
 
 /* Get current center (degrees). */

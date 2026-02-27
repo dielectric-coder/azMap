@@ -181,3 +181,23 @@ int text_build(const char *str, float x, float y, float size,
 
     return vcount;
 }
+
+float text_width(const char *str, float size)
+{
+    float char_w = size * 0.7f;
+    float gap = size * 0.15f;
+    float w = 0.0f;
+    int n = 0;
+
+    for (int i = 0; str[i]; i++) {
+        if (str[i] == ' ')
+            w += char_w * 0.6f;
+        else
+            w += char_w + gap;
+        n++;
+    }
+    /* Remove trailing gap from last non-space char */
+    if (n > 0 && str[n - 1] != ' ')
+        w -= gap;
+    return w;
+}

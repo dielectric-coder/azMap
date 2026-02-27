@@ -64,6 +64,9 @@ int renderer_init(Renderer *r, const char *shader_dir)
     glAttachShader(r->program, fs);
     glLinkProgram(r->program);
 
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
     int ok;
     glGetProgramiv(r->program, GL_LINK_STATUS, &ok);
     if (!ok) {
@@ -72,9 +75,6 @@ int renderer_init(Renderer *r, const char *shader_dir)
         fprintf(stderr, "Program link error: %s\n", log);
         return -1;
     }
-
-    glDeleteShader(vs);
-    glDeleteShader(fs);
 
     r->mvp_loc = glGetUniformLocation(r->program, "u_mvp");
     r->color_loc = glGetUniformLocation(r->program, "u_color");
@@ -219,11 +219,10 @@ void renderer_upload_npole(Renderer *r, float px, float py, float size_km)
     glBindVertexArray(0);
 }
 
-void renderer_upload_earth_circle(Renderer *r)
+void renderer_upload_earth_circle(Renderer *r, double radius)
 {
     int n = 360;
     float *verts = malloc(n * 2 * sizeof(float));
-    double radius = EARTH_MAX_PROJ_RADIUS;
     for (int i = 0; i < n; i++) {
         double a = 2.0 * M_PI * i / n;
         verts[i * 2]     = (float)(radius * cos(a));
@@ -324,6 +323,94 @@ void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int spl
     glBindVertexArray(0);
     r->label_vertex_count = vertex_count;
     r->label_split = split;
+}
+
+void renderer_upload_label_bgs(Renderer *r, float *verts, int vertex_count, int split)
+{
+    if (!r->label_bg_vao) {
+        glGenVertexArrays(1, &r->label_bg_vao);
+        glGenBuffers(1, &r->label_bg_vbo);
+    }
+    glBindVertexArray(r->label_bg_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->label_bg_vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertex_count * 2 * sizeof(float),
+                 verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->label_bg_vertex_count = vertex_count;
+    r->label_bg_split = split;
+}
+
+void renderer_upload_buttons(Renderer *r,
+                             float *quad_verts, int quad_vert_count,
+                             float *text_verts, int text_vert_count,
+                             int btn_count, int hovered_quad)
+{
+    /* Background quads */
+    if (!r->btn_bg_vao) {
+        glGenVertexArrays(1, &r->btn_bg_vao);
+        glGenBuffers(1, &r->btn_bg_vbo);
+    }
+    glBindVertexArray(r->btn_bg_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->btn_bg_vbo);
+    glBufferData(GL_ARRAY_BUFFER, quad_vert_count * 2 * sizeof(float),
+                 quad_verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->btn_bg_vertex_count = quad_vert_count;
+
+    /* Text */
+    if (!r->btn_text_vao) {
+        glGenVertexArrays(1, &r->btn_text_vao);
+        glGenBuffers(1, &r->btn_text_vbo);
+    }
+    glBindVertexArray(r->btn_text_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->btn_text_vbo);
+    glBufferData(GL_ARRAY_BUFFER, text_vert_count * 2 * sizeof(float),
+                 text_verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->btn_text_vertex_count = text_vert_count;
+
+    r->btn_count = btn_count;
+    r->btn_hovered_quad = hovered_quad;
+}
+
+void renderer_upload_popup(Renderer *r,
+                           float *quad_verts, int quad_vert_count,
+                           float *text_verts, int text_vert_count,
+                           int close_hovered)
+{
+    if (!r->popup_bg_vao) {
+        glGenVertexArrays(1, &r->popup_bg_vao);
+        glGenBuffers(1, &r->popup_bg_vbo);
+    }
+    glBindVertexArray(r->popup_bg_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->popup_bg_vbo);
+    glBufferData(GL_ARRAY_BUFFER, quad_vert_count * 2 * sizeof(float),
+                 quad_verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->popup_bg_vertex_count = quad_vert_count;
+
+    if (!r->popup_text_vao) {
+        glGenVertexArrays(1, &r->popup_text_vao);
+        glGenBuffers(1, &r->popup_text_vbo);
+    }
+    glBindVertexArray(r->popup_text_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->popup_text_vbo);
+    glBufferData(GL_ARRAY_BUFFER, text_vert_count * 2 * sizeof(float),
+                 text_verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->popup_text_vertex_count = text_vert_count;
+
+    r->popup_close_hovered = close_hovered;
 }
 
 void renderer_upload_text(Renderer *r, float *verts, int vertex_count)
@@ -445,6 +532,20 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         ortho[15] = 1.0f;
         glUniformMatrix4fv(r->mvp_loc, 1, GL_FALSE, ortho);
 
+        /* Label backgrounds (semi-transparent) */
+        if (r->label_bg_vao && r->label_bg_vertex_count > 0) {
+            glBindVertexArray(r->label_bg_vao);
+            if (r->label_bg_split > 0) {
+                glUniform4f(r->color_loc, 0.0f, 0.0f, 0.0f, 0.55f);
+                glDrawArrays(GL_TRIANGLES, 0, r->label_bg_split);
+            }
+            int bg_target = r->label_bg_vertex_count - r->label_bg_split;
+            if (bg_target > 0) {
+                glUniform4f(r->color_loc, 0.0f, 0.0f, 0.0f, 0.55f);
+                glDrawArrays(GL_TRIANGLES, r->label_bg_split, bg_target);
+            }
+        }
+
         /* Labels (center = cyan, target = orange) */
         if (r->label_vao && r->label_vertex_count > 0) {
             glBindVertexArray(r->label_vao);
@@ -457,6 +558,49 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
                 glUniform4f(r->color_loc, 1.0f, 0.6f, 0.2f, 1.0f);
                 glDrawArrays(GL_LINES, r->label_split, target_count);
             }
+        }
+
+        /* UI button backgrounds */
+        if (r->btn_bg_vao && r->btn_bg_vertex_count > 0) {
+            glBindVertexArray(r->btn_bg_vao);
+            for (int i = 0; i < r->btn_count; i++) {
+                if (i == r->btn_hovered_quad)
+                    glUniform4f(r->color_loc, 0.25f, 0.25f, 0.35f, 0.75f);
+                else
+                    glUniform4f(r->color_loc, 0.1f, 0.1f, 0.18f, 0.65f);
+                glDrawArrays(GL_TRIANGLES, i * 6, 6);
+            }
+        }
+
+        /* UI button text */
+        if (r->btn_text_vao && r->btn_text_vertex_count > 0) {
+            glUniform4f(r->color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
+            glBindVertexArray(r->btn_text_vao);
+            glDrawArrays(GL_LINES, 0, r->btn_text_vertex_count);
+        }
+
+        /* Popup panel */
+        if (r->popup_bg_vao && r->popup_bg_vertex_count > 0) {
+            glBindVertexArray(r->popup_bg_vao);
+            /* Quad 0: body (dark) */
+            glUniform4f(r->color_loc, 0.08f, 0.08f, 0.14f, 0.90f);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            /* Quad 1: title bar (slightly lighter) */
+            glUniform4f(r->color_loc, 0.15f, 0.15f, 0.25f, 0.92f);
+            glDrawArrays(GL_TRIANGLES, 6, 6);
+            /* Quad 2: close button */
+            if (r->popup_close_hovered)
+                glUniform4f(r->color_loc, 0.4f, 0.15f, 0.15f, 0.92f);
+            else
+                glUniform4f(r->color_loc, 0.25f, 0.12f, 0.12f, 0.92f);
+            glDrawArrays(GL_TRIANGLES, 12, 6);
+        }
+
+        /* Popup text */
+        if (r->popup_text_vao && r->popup_text_vertex_count > 0) {
+            glUniform4f(r->color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
+            glBindVertexArray(r->popup_text_vao);
+            glDrawArrays(GL_LINES, 0, r->popup_text_vertex_count);
         }
 
         /* HUD text overlay */
@@ -485,4 +629,9 @@ void renderer_destroy(Renderer *r)
     if (r->night_vao) { glDeleteVertexArrays(1, &r->night_vao); glDeleteBuffers(1, &r->night_vbo); }
     if (r->text_vao) { glDeleteVertexArrays(1, &r->text_vao); glDeleteBuffers(1, &r->text_vbo); }
     if (r->label_vao) { glDeleteVertexArrays(1, &r->label_vao); glDeleteBuffers(1, &r->label_vbo); }
+    if (r->label_bg_vao) { glDeleteVertexArrays(1, &r->label_bg_vao); glDeleteBuffers(1, &r->label_bg_vbo); }
+    if (r->btn_bg_vao) { glDeleteVertexArrays(1, &r->btn_bg_vao); glDeleteBuffers(1, &r->btn_bg_vbo); }
+    if (r->btn_text_vao) { glDeleteVertexArrays(1, &r->btn_text_vao); glDeleteBuffers(1, &r->btn_text_vbo); }
+    if (r->popup_bg_vao) { glDeleteVertexArrays(1, &r->popup_bg_vao); glDeleteBuffers(1, &r->popup_bg_vbo); }
+    if (r->popup_text_vao) { glDeleteVertexArrays(1, &r->popup_text_vao); glDeleteBuffers(1, &r->popup_text_vbo); }
 }

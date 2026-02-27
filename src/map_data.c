@@ -4,15 +4,7 @@
 #include "map_data.h"
 #include "projection.h"
 
-/* Internal: raw lat/lon storage for reprojection */
-static double *raw_lats = NULL;
-static double *raw_lons = NULL;
-static int raw_count = 0;
-static int raw_seg_starts[MAX_SEGMENTS];
-static int raw_seg_counts[MAX_SEGMENTS];
-static int raw_num_segments = 0;
-
-static int load_raw(const char *shp_path)
+static int load_raw(MapData *md, const char *shp_path)
 {
     SHPHandle shp = SHPOpen(shp_path, "rb");
     if (!shp) {
@@ -47,35 +39,35 @@ static int load_raw(const char *shp_path)
     }
 
     /* Allocate raw storage */
-    free(raw_lats);
-    free(raw_lons);
-    raw_lats = malloc(total * sizeof(double));
-    raw_lons = malloc(total * sizeof(double));
-    if (!raw_lats || !raw_lons) {
+    free(md->raw_lats);
+    free(md->raw_lons);
+    md->raw_lats = malloc(total * sizeof(double));
+    md->raw_lons = malloc(total * sizeof(double));
+    if (!md->raw_lats || !md->raw_lons) {
         SHPClose(shp);
         return -1;
     }
 
     /* Second pass: read vertices */
-    raw_count = 0;
-    raw_num_segments = 0;
-    for (int i = 0; i < num_entities && raw_num_segments < MAX_SEGMENTS; i++) {
+    md->raw_count = 0;
+    md->raw_num_segments = 0;
+    for (int i = 0; i < num_entities && md->raw_num_segments < MAX_SEGMENTS; i++) {
         SHPObject *obj = SHPReadObject(shp, i);
         if (!obj) continue;
-        for (int p = 0; p < obj->nParts && raw_num_segments < MAX_SEGMENTS; p++) {
+        for (int p = 0; p < obj->nParts && md->raw_num_segments < MAX_SEGMENTS; p++) {
             int start = obj->panPartStart[p];
             int end = (p + 1 < obj->nParts) ? obj->panPartStart[p + 1] : obj->nVertices;
             int count = end - start;
             if (count <= 1) continue;
 
-            raw_seg_starts[raw_num_segments] = raw_count;
-            raw_seg_counts[raw_num_segments] = count;
-            raw_num_segments++;
+            md->raw_seg_starts[md->raw_num_segments] = md->raw_count;
+            md->raw_seg_counts[md->raw_num_segments] = count;
+            md->raw_num_segments++;
 
             for (int v = start; v < end; v++) {
-                raw_lons[raw_count] = obj->padfX[v];
-                raw_lats[raw_count] = obj->padfY[v];
-                raw_count++;
+                md->raw_lons[md->raw_count] = obj->padfX[v];
+                md->raw_lats[md->raw_count] = obj->padfY[v];
+                md->raw_count++;
             }
         }
         SHPDestroyObject(obj);
@@ -92,10 +84,10 @@ static int load_raw(const char *shp_path)
 static void project_all(MapData *md)
 {
     /* First pass: project all raw vertices */
-    float *proj = malloc(raw_count * 2 * sizeof(float));
-    for (int i = 0; i < raw_count; i++) {
+    float *proj = malloc(md->raw_count * 2 * sizeof(float));
+    for (int i = 0; i < md->raw_count; i++) {
         double x, y;
-        projection_forward(raw_lats[i], raw_lons[i], &x, &y);
+        projection_forward(md->raw_lats[i], md->raw_lons[i], &x, &y);
         proj[i * 2]     = (float)x;
         proj[i * 2 + 1] = (float)y;
     }
@@ -104,12 +96,12 @@ static void project_all(MapData *md)
      * Output may have more segments than input (but same vertex count). */
     free(md->vertices);
     md->vertices = proj;
-    md->vertex_count = raw_count;
+    md->vertex_count = md->raw_count;
     md->num_segments = 0;
 
-    for (int s = 0; s < raw_num_segments && md->num_segments < MAX_SEGMENTS; s++) {
-        int base = raw_seg_starts[s];
-        int count = raw_seg_counts[s];
+    for (int s = 0; s < md->raw_num_segments && md->num_segments < MAX_SEGMENTS; s++) {
+        int base = md->raw_seg_starts[s];
+        int count = md->raw_seg_counts[s];
         int seg_start = base;
 
         for (int v = 1; v < count; v++) {
@@ -146,8 +138,12 @@ int map_data_load(MapData *md, const char *shp_path)
     md->vertices = NULL;
     md->vertex_count = 0;
     md->num_segments = 0;
+    md->raw_lats = NULL;
+    md->raw_lons = NULL;
+    md->raw_count = 0;
+    md->raw_num_segments = 0;
 
-    if (load_raw(shp_path) != 0) return -1;
+    if (load_raw(md, shp_path) != 0) return -1;
     project_all(md);
     return 0;
 }
@@ -155,7 +151,7 @@ int map_data_load(MapData *md, const char *shp_path)
 void map_data_reproject(MapData *md, const char *shp_path)
 {
     (void)shp_path;
-    if (raw_count > 0) {
+    if (md->raw_count > 0) {
         project_all(md);
     }
 }
@@ -166,8 +162,10 @@ void map_data_free(MapData *md)
     md->vertices = NULL;
     md->vertex_count = 0;
     md->num_segments = 0;
-    free(raw_lats);
-    free(raw_lons);
-    raw_lats = NULL;
-    raw_lons = NULL;
+    free(md->raw_lats);
+    free(md->raw_lons);
+    md->raw_lats = NULL;
+    md->raw_lons = NULL;
+    md->raw_count = 0;
+    md->raw_num_segments = 0;
 }

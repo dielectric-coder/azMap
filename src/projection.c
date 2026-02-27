@@ -4,11 +4,21 @@
 #define DEG2RAD (M_PI / 180.0)
 #define RAD2DEG (180.0 / M_PI)
 
+static ProjMode proj_mode = PROJ_AZEQ;
+
 static double center_lat_rad;
 static double center_lon_rad;
 static double center_lat_deg_store;
 static double center_lon_deg_store;
 static double sin_clat, cos_clat;
+
+void projection_set_mode(ProjMode mode) { proj_mode = mode; }
+ProjMode projection_get_mode(void) { return proj_mode; }
+
+double projection_get_radius(void)
+{
+    return (proj_mode == PROJ_ORTHO) ? EARTH_RADIUS_KM : EARTH_MAX_PROJ_RADIUS;
+}
 
 void projection_set_center(double lat_deg, double lon_deg)
 {
@@ -42,10 +52,22 @@ int projection_forward(double lat_deg, double lon_deg, double *x, double *y)
     if (cos_c > 1.0) cos_c = 1.0;
     if (cos_c < -1.0) cos_c = -1.0;
 
+    if (proj_mode == PROJ_ORTHO) {
+        if (cos_c <= 0.0) {
+            /* Back hemisphere — clip */
+            *x = 1e6;
+            *y = 1e6;
+            return -1;
+        }
+        *x = EARTH_RADIUS_KM * cos_lat * sin(dlon);
+        *y = EARTH_RADIUS_KM * (cos_clat * sin_lat - sin_clat * cos_lat * cos_dlon);
+        return 0;
+    }
+
+    /* Azimuthal equidistant */
     double c = acos(cos_c);
 
     if (c < 1e-10) {
-        /* Point is at center */
         *x = 0.0;
         *y = 0.0;
         return 0;
@@ -69,18 +91,24 @@ int projection_inverse(double x, double y, double *lat_deg, double *lon_deg)
         return 0;
     }
 
-    double c = rho / EARTH_RADIUS_KM;
+    double c, sin_c, cos_c;
 
-    if (c > M_PI) return -1;  /* Outside globe */
-
-    double sin_c = sin(c);
-    double cos_c = cos(c);
+    if (proj_mode == PROJ_ORTHO) {
+        if (rho > EARTH_RADIUS_KM) return -1;
+        c = asin(rho / EARTH_RADIUS_KM);
+        sin_c = sin(c);
+        cos_c = cos(c);
+    } else {
+        c = rho / EARTH_RADIUS_KM;
+        if (c > M_PI) return -1;
+        sin_c = sin(c);
+        cos_c = cos(c);
+    }
 
     double lat = asin(cos_c * sin_clat + (y * sin_c * cos_clat) / rho);
     double lon;
 
     if (fabs(cos_clat) < 1e-10) {
-        /* Center is at a pole */
         lon = center_lon_rad + atan2(x, (center_lat_rad > 0 ? -y : y));
     } else {
         lon = center_lon_rad + atan2(x * sin_c,

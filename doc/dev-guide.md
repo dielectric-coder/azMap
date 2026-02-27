@@ -10,9 +10,9 @@ azMap is a single-binary C11 application using OpenGL 3.3 core profile. All rend
 src/
   main.c            Entry point, GLFW window, CLI parsing, main loop
   config.h/c        Config file parser (~/.config/azmap.conf)
-  projection.h/c    Azimuthal equidistant forward/inverse projection math
+  projection.h/c    Map projection math (azimuthal equidistant + orthographic modes)
   map_data.h/c      Shapefile loading (shapelib), vertex arrays, reprojection
-  grid.h/c          Center-based range/azimuth grid generation
+  grid.h/c          Grid generation (range rings/radials for azeq; parallels/meridians for ortho)
   solar.h/c         Subsolar point calculation from UTC time
   nightmesh.h/c     Day/night overlay mesh generation (per-vertex alpha)
   renderer.h/c      OpenGL shader compilation, VAO/VBO management, draw calls
@@ -26,7 +26,7 @@ shaders/
 
 ### Coordinate System
 
-The azimuthal equidistant projection maps lat/lon to x,y in **kilometers** from the center point. The camera produces an orthographic matrix mapping this km-space to OpenGL clip space. `zoom_km` controls the visible diameter (10 to 40030 km).
+Both projections map lat/lon to x,y in **kilometers** from the center point. In azimuthal equidistant mode the Earth disc extends to ~20015 km radius; in orthographic mode it extends to 6371 km (one hemisphere). The camera produces an orthographic matrix mapping this km-space to OpenGL clip space. `zoom_km` controls the visible diameter (10 to 40030 km, clamped to 2×radius on projection toggle).
 
 ### Data Flow
 
@@ -48,7 +48,7 @@ Drawn back to front in `renderer_draw()`:
 |-------|-------|-------|-----------|
 | 1 | Earth filled disc | Dark blue-gray (0.12, 0.12, 0.25) | GL_TRIANGLE_FAN |
 | 2 | Earth boundary circle | Dark blue (0.15, 0.15, 0.3) | GL_LINE_LOOP |
-| 3 | Grid (range rings + radials) | Dim (0.2, 0.2, 0.3) | GL_LINE_STRIP |
+| 3 | Grid (rings+radials or parallels+meridians) | Dim (0.2, 0.2, 0.3) | GL_LINE_STRIP |
 | 4 | Night overlay | Dark (0.0, 0.0, 0.05) × per-vertex alpha | GL_TRIANGLES |
 | 5 | Country borders | Gray (0.4, 0.4, 0.5) | GL_LINE_STRIP |
 | 6 | Coastlines | Green (0.2, 0.8, 0.3) | GL_LINE_STRIP |
@@ -89,10 +89,16 @@ typedef struct {
 
 ### Grid System
 
-The grid (`grid.c`) generates geometry in km-space directly (no projection needed):
+The grid (`grid.c`) provides two generation modes matching the projection:
 
-- **Range rings**: concentric circles every 5000 km, from 5000 km to ~20000 km
-- **Radial lines**: 12 lines from the origin to the Earth boundary at 30-degree intervals
+- **`grid_build()`** (azimuthal equidistant) — generates geometry directly in km-space:
+  - Range rings: concentric circles every 5000 km, from 5000 km to ~20000 km
+  - Radial lines: 12 lines from the origin to the Earth boundary at 30-degree intervals
+
+- **`grid_build_geo()`** (orthographic) — generates geographic parallels and meridians by sampling lat/lon points through `projection_forward()`:
+  - Parallels: every 30° from -60° to 60°, sampled at 5° longitude steps
+  - Meridians: every 30°, sampled at 5° latitude steps
+  - Points on the back hemisphere (where `projection_forward()` returns -1) start new segments, producing natural horizon clipping
 
 ### Text System
 
@@ -118,17 +124,24 @@ Location labels are rebuilt each frame in the main loop:
 
 ### Projection Module
 
-`projection.c` implements the azimuthal equidistant projection:
+`projection.c` implements two projection modes selected via `ProjMode` enum:
 
-- `projection_set_center(lat, lon)` - sets the projection center (stored as module-level state)
-- `projection_forward(lat, lon, &x, &y)` - lat/lon degrees to km-space
-- `projection_inverse(x, y, &lat, &lon)` - km-space back to lat/lon
-- `projection_distance(lat1, lon1, lat2, lon2)` - great-circle distance in km
-- `projection_azimuth(lat1, lon1, lat2, lon2)` - azimuth in degrees (0=N, clockwise)
+- **`PROJ_AZEQ`** (default) — azimuthal equidistant. The entire Earth maps to a disc of radius `EARTH_MAX_PROJ_RADIUS` (~20015 km). All points are always visible.
+- **`PROJ_ORTHO`** — orthographic (sphere). One hemisphere maps to a disc of radius `EARTH_RADIUS_KM` (6371 km). Back-hemisphere points (`cos_c <= 0`) are clipped: `projection_forward()` returns -1 and sets coords to 1e6.
 
-### Antipodal Handling
+API:
 
-Points near the antipode of the projection center produce large jumps in km-space. `map_data.c` splits polyline segments where consecutive projected points are more than 5000 km apart, preventing visual artifacts.
+- `projection_set_mode(mode)` / `projection_get_mode()` — switch between modes
+- `projection_get_radius()` — returns `EARTH_MAX_PROJ_RADIUS` for azeq, `EARTH_RADIUS_KM` for ortho
+- `projection_set_center(lat, lon)` — sets the projection center (stored as module-level state)
+- `projection_forward(lat, lon, &x, &y)` — lat/lon degrees to km-space (returns -1 if clipped in ortho)
+- `projection_inverse(x, y, &lat, &lon)` — km-space back to lat/lon (uses `asin(rho/R)` for ortho, `rho/R` for azeq)
+- `projection_distance(lat1, lon1, lat2, lon2)` — great-circle distance in km
+- `projection_azimuth(lat1, lon1, lat2, lon2)` — azimuth in degrees (0=N, clockwise)
+
+### Antipodal / Back-Hemisphere Handling
+
+In azimuthal equidistant mode, points near the antipode produce large jumps in km-space. In orthographic mode, back-hemisphere points are set to 1e6 km. In both cases, `map_data.c` splits polyline segments where consecutive projected points are more than 5000 km apart, preventing visual artifacts.
 
 ## Building
 

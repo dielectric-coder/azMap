@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <unistd.h>
 #include <math.h>
+#include <time.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
@@ -19,6 +20,7 @@
 #include "config.h"
 #include "solar.h"
 #include "nightmesh.h"
+#include "ui.h"
 
 #define DEFAULT_WIDTH  800
 #define DEFAULT_HEIGHT 800
@@ -70,6 +72,25 @@ static void km_to_pixel(const float *mvp, float kx, float ky,
     /* pixel (y-down for text system) */
     *px = (nx * 0.5f + 0.5f) * (float)fb_w;
     *py = (-ny * 0.5f + 0.5f) * (float)fb_h;
+}
+
+/* Build a quad (2 triangles, 6 vertices) for a label background.
+ * x,y: top-left of text; w,h: text dimensions; pad: padding pixels.
+ * Returns 6 (vertices written). */
+static int build_label_bg(float x, float y, float w, float h, float pad,
+                           float *out)
+{
+    float x0 = x - pad, y0 = y - pad;
+    float x1 = x + w + pad, y1 = y + h + pad;
+    /* Triangle 1 */
+    out[0]  = x0; out[1]  = y0;
+    out[2]  = x1; out[3]  = y0;
+    out[4]  = x1; out[5]  = y1;
+    /* Triangle 2 */
+    out[6]  = x0; out[7]  = y0;
+    out[8]  = x1; out[9]  = y1;
+    out[10] = x0; out[11] = y1;
+    return 6;
 }
 
 static void print_usage(const char *prog)
@@ -186,7 +207,8 @@ int main(int argc, char **argv)
     /* Set up projection */
     projection_set_center(center_lat, center_lon);
 
-    /* Project target point */
+    /* Project original center and target points */
+    double cx = 0.0, cy = 0.0;  /* original center in projected space */
     double tx, ty;
     projection_forward(target_lat, target_lon, &tx, &ty);
 
@@ -273,7 +295,7 @@ int main(int argc, char **argv)
         renderer_upload_borders(&renderer, &borders);
     renderer_upload_grid(&renderer, &grid);
     renderer_upload_target_line(&renderer, 0.0f, 0.0f, (float)tx, (float)ty);
-    renderer_upload_earth_circle(&renderer);
+    renderer_upload_earth_circle(&renderer, projection_get_radius());
 
     /* North pole marker */
     double npx, npy;
@@ -282,6 +304,29 @@ int main(int argc, char **argv)
     /* Text overlay (rebuilt each second for clock update) */
     text_init();
     float text_verts[8192];
+
+    /* UI buttons */
+    UI ui;
+    ui_init(&ui);
+    int btn_home   = ui_add_button(&ui, "Home",   0, 0, 90, 30);
+    int btn_proj   = ui_add_button(&ui, "Proj",   0, 0, 90, 30);
+    int btn_mode   = ui_add_button(&ui, "Mode",   0, 0, 90, 30);
+    int btn_layers = ui_add_button(&ui, "Layers", 0, 0, 90, 30);
+    /* Mode sub-buttons */
+    int btn_opt1 = ui_add_button(&ui, "QRZ",  0, 0, 90, 30);
+    int btn_opt2 = ui_add_button(&ui, "WSJT", 0, 0, 90, 30);
+    int btn_opt3 = ui_add_button(&ui, "BCB",  0, 0, 90, 30);
+    /* Layers sub-buttons */
+    int btn_aurora = ui_add_button(&ui, "Aurora",  0, 0, 110, 30);
+    int btn_spore  = ui_add_button(&ui, "Spor. E", 0, 0, 110, 30);
+    int btn_muf    = ui_add_button(&ui, "MUF",     0, 0, 110, 30);
+    /* Start in home mode */
+    ui.buttons[btn_opt1].visible = 0;
+    ui.buttons[btn_opt2].visible = 0;
+    ui.buttons[btn_opt3].visible = 0;
+    ui.buttons[btn_aurora].visible = 0;
+    ui.buttons[btn_spore].visible = 0;
+    ui.buttons[btn_muf].visible = 0;
 
     /* Camera — use actual framebuffer size (differs from window size on HiDPI) */
     Camera cam;
@@ -298,18 +343,43 @@ int main(int argc, char **argv)
 
     /* Input */
     InputState input;
-    input_init(&input, window, &cam);
+    input_init(&input, window, &cam, &ui, center_lat, center_lon);
 
     /* Label vertex buffer (rebuilt each frame) */
     float label_verts[8192];
+
+    /* Night overlay timer (outside loop so center-dirty can reset it) */
+    time_t last_sun_update = 0;
 
     /* Main loop */
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
+        /* Handle projection center change (drag / arrow keys) */
+        if (input.center_dirty) {
+            input.center_dirty = 0;
+            projection_set_center(input.center_lat, input.center_lon);
+            map_data_reproject(&map, NULL);
+            renderer_upload_map(&renderer, &map);
+            if (has_borders) {
+                map_data_reproject(&borders, NULL);
+                renderer_upload_borders(&renderer, &borders);
+            }
+            projection_forward(center_lat, center_lon, &cx, &cy);
+            projection_forward(target_lat, target_lon, &tx, &ty);
+            renderer_upload_target_line(&renderer, (float)cx, (float)cy, (float)tx, (float)ty);
+            projection_forward(90.0, 0.0, &npx, &npy);
+            /* In ortho mode, grid depends on projection center */
+            if (projection_get_mode() == PROJ_ORTHO) {
+                grid_build_geo(&grid);
+                renderer_upload_grid(&renderer, &grid);
+            }
+            last_sun_update = 0; /* force night mesh rebuild */
+        }
+
         /* Update marker size relative to zoom */
         float ms = cam.zoom_km * 0.005f;
-        renderer_upload_markers(&renderer, 0.0f, 0.0f, (float)tx, (float)ty, ms);
+        renderer_upload_markers(&renderer, (float)cx, (float)cy, (float)tx, (float)ty, ms);
         renderer_upload_npole(&renderer, (float)npx, (float)npy, ms);
 
         glfwGetFramebufferSize(window, &fb_w, &fb_h);
@@ -320,21 +390,146 @@ int main(int argc, char **argv)
         /* Build labels at screen positions of center and target markers */
         float label_size = 14.0f;
         float cpx, cpy, tpx, tpy;
-        km_to_pixel(mvp, 0.0f, 0.0f, fb_w, fb_h, &cpx, &cpy);
+        km_to_pixel(mvp, (float)cx, (float)cy, fb_w, fb_h, &cpx, &cpy);
         km_to_pixel(mvp, (float)tx, (float)ty, fb_w, fb_h, &tpx, &tpy);
 
-        /* Center label: offset below center crosshair */
-        int center_vcount = text_build(center_label,
-            cpx - (float)strlen(center_label) * label_size * 0.35f * 0.5f,
-            cpy + label_size * 0.8f,
+        /* Center label: offset above center marker */
+        float cw = text_width(center_label, label_size);
+        float clx = cpx - cw * 0.5f;
+        float cly = cpy - label_size * 1.8f;
+        int center_vcount = text_build(center_label, clx, cly,
             label_size, label_verts, 4096);
         /* Target label: offset below target crosshair */
-        int target_vcount = text_build(target_label,
-            tpx - (float)strlen(target_label) * label_size * 0.35f * 0.5f,
-            tpy + label_size * 0.8f,
+        float tw = text_width(target_label, label_size);
+        float tlx = tpx - tw * 0.5f;
+        float tly = tpy + label_size * 0.8f;
+        int target_vcount = text_build(target_label, tlx, tly,
             label_size, label_verts + center_vcount * 2, 4096 - center_vcount);
 
         renderer_upload_labels(&renderer, label_verts, center_vcount + target_vcount, center_vcount);
+
+        /* Label backgrounds */
+        float bg_verts[24]; /* 2 quads * 6 verts * 2 floats */
+        float pad = 4.0f;
+        int cbg = build_label_bg(clx, cly, cw, label_size, pad, bg_verts);
+        int tbg = build_label_bg(tlx, tly, tw, label_size, pad, bg_verts + cbg * 2);
+        renderer_upload_label_bgs(&renderer, bg_verts, cbg + tbg, cbg);
+
+        /* Update button positions (horizontal, centered at bottom) */
+        {
+            float bw = 90.0f, bh = 30.0f, gap = 10.0f, margin = 10.0f;
+            int n = ui.count;
+            float total_w = n * bw + (n - 1) * gap;
+            float start_x = ((float)fb_w - total_w) * 0.5f;
+            float by = (float)fb_h - bh - margin;
+            for (int bi = 0; bi < n; bi++) {
+                ui.buttons[bi].x = start_x + bi * (bw + gap);
+                ui.buttons[bi].y = by;
+                ui.buttons[bi].w = bw;
+                ui.buttons[bi].h = bh;
+            }
+        }
+
+        /* Build and upload button geometry */
+        {
+            float btn_quads[UI_MAX_BUTTONS * 12];
+            float btn_text[8192];
+            int quad_count, text_count, hovered_quad;
+            ui_build_geometry(&ui, btn_quads, &quad_count,
+                              btn_text, &text_count, &hovered_quad);
+            if (quad_count > 0 || text_count > 0)
+                renderer_upload_buttons(&renderer, btn_quads, quad_count,
+                                        btn_text, text_count,
+                                        quad_count / 6, hovered_quad);
+        }
+
+        /* Build and upload popup geometry */
+        if (ui.popup.visible) {
+            float popup_quads[3 * 12]; /* 3 quads * 6 verts * 2 floats */
+            float popup_text[4096];
+            int pq_count, pt_count;
+            ui_build_popup_geometry(&ui, fb_w, fb_h,
+                                    popup_quads, &pq_count,
+                                    popup_text, &pt_count);
+            renderer_upload_popup(&renderer, popup_quads, pq_count,
+                                  popup_text, pt_count,
+                                  ui.popup_close_hovered);
+        } else {
+            renderer.popup_bg_vertex_count = 0;
+            renderer.popup_text_vertex_count = 0;
+        }
+
+        /* Poll button clicks */
+        if (ui.clicked >= 0) {
+            printf("Button clicked: %s\n", ui.buttons[ui.clicked].label);
+            if (ui.clicked == btn_proj) {
+                /* Toggle projection mode */
+                ProjMode cur = projection_get_mode();
+                ProjMode nxt = (cur == PROJ_AZEQ) ? PROJ_ORTHO : PROJ_AZEQ;
+                projection_set_mode(nxt);
+                /* Reproject all map geometry */
+                map_data_reproject(&map, NULL);
+                renderer_upload_map(&renderer, &map);
+                if (has_borders) {
+                    map_data_reproject(&borders, NULL);
+                    renderer_upload_borders(&renderer, &borders);
+                }
+                /* Re-project key points */
+                projection_forward(center_lat, center_lon, &cx, &cy);
+                projection_forward(target_lat, target_lon, &tx, &ty);
+                renderer_upload_target_line(&renderer, (float)cx, (float)cy, (float)tx, (float)ty);
+                projection_forward(90.0, 0.0, &npx, &npy);
+                /* Rebuild grid for new mode */
+                if (nxt == PROJ_ORTHO)
+                    grid_build_geo(&grid);
+                else
+                    grid_build(&grid);
+                renderer_upload_grid(&renderer, &grid);
+                /* Rebuild earth circle and disc */
+                renderer_upload_earth_circle(&renderer, projection_get_radius());
+                /* Force night mesh rebuild */
+                last_sun_update = 0;
+                /* Clamp zoom */
+                double max_diam = 2.0 * projection_get_radius();
+                if (cam.zoom_km > (float)max_diam)
+                    cam.zoom_km = (float)max_diam;
+            } else if (ui.clicked == btn_mode) {
+                /* Show mode sub-buttons, hide top-level menus */
+                ui.buttons[btn_proj].visible = 0;
+                ui.buttons[btn_mode].visible = 0;
+                ui.buttons[btn_layers].visible = 0;
+                ui.buttons[btn_opt1].visible = 1;
+                ui.buttons[btn_opt2].visible = 1;
+                ui.buttons[btn_opt3].visible = 1;
+            } else if (ui.clicked == btn_layers) {
+                /* Show layers sub-buttons, hide top-level menus */
+                ui.buttons[btn_proj].visible = 0;
+                ui.buttons[btn_mode].visible = 0;
+                ui.buttons[btn_layers].visible = 0;
+                ui.buttons[btn_aurora].visible = 1;
+                ui.buttons[btn_spore].visible = 1;
+                ui.buttons[btn_muf].visible = 1;
+            } else if (ui.clicked == btn_opt1) {
+                ui_show_popup(&ui, "QRZ");
+            } else if (ui.clicked == btn_opt2) {
+                ui_show_popup(&ui, "WSJT");
+            } else if (ui.clicked == btn_opt3) {
+                ui_show_popup(&ui, "BCB");
+            } else if (ui.clicked == btn_home) {
+                /* Collapse everything back to home */
+                ui.buttons[btn_proj].visible = 1;
+                ui.buttons[btn_mode].visible = 1;
+                ui.buttons[btn_layers].visible = 1;
+                ui.buttons[btn_opt1].visible = 0;
+                ui.buttons[btn_opt2].visible = 0;
+                ui.buttons[btn_opt3].visible = 0;
+                ui.buttons[btn_aurora].visible = 0;
+                ui.buttons[btn_spore].visible = 0;
+                ui.buttons[btn_muf].visible = 0;
+                ui_hide_popup(&ui);
+            }
+            ui.clicked = -1;
+        }
 
         /* Rebuild HUD text every second (includes live clock) */
         {
@@ -344,6 +539,7 @@ int main(int argc, char **argv)
                 last_text_update = now;
                 struct tm *gt = gmtime(&now);
                 struct tm *lt = localtime(&now);
+                if (!gt || !lt) continue;
                 char line1[128], line2[128];
                 snprintf(line1, sizeof(line1),
                          "Dist: %.1f km  Az to: %.1f^  Az from: %.1f^",
@@ -353,8 +549,10 @@ int main(int argc, char **argv)
                          lt->tm_hour, lt->tm_min, lt->tm_sec,
                          gt->tm_hour, gt->tm_min, gt->tm_sec);
                 float size = 20.0f;
-                int vc = text_build(line1, 16.0f, 16.0f, size, text_verts, 4096);
-                vc += text_build(line2, 16.0f, 16.0f + size * 1.4f, size,
+                float x1 = ((float)fb_w - text_width(line1, size)) * 0.5f;
+                float x2 = ((float)fb_w - text_width(line2, size)) * 0.5f;
+                int vc = text_build(line1, x1, 16.0f, size, text_verts, 4096);
+                vc += text_build(line2, x2, 16.0f + size * 1.4f, size,
                                  text_verts + vc * 2, 4096 - vc);
                 renderer_upload_text(&renderer, text_verts, vc);
             }
@@ -362,7 +560,6 @@ int main(int argc, char **argv)
 
         /* Update night overlay periodically */
         {
-            static time_t last_sun_update = 0;
             time_t now = time(NULL);
             if (now - last_sun_update >= 60) {
                 last_sun_update = now;

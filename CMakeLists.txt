@@ -31,6 +31,7 @@ add_executable(azmap
     src/grid.c
     src/solar.c
     src/nightmesh.c
+    src/ui.c
 )
 
 target_include_directories(azmap PRIVATE

@@ -9,6 +9,13 @@ typedef struct {
     int    segment_starts[MAX_SEGMENTS]; /* Start index of each polyline */
     int    segment_counts[MAX_SEGMENTS]; /* Vertex count per polyline */
     int    num_segments;
+    /* Raw lat/lon for reprojection */
+    double *raw_lats;
+    double *raw_lons;
+    int     raw_count;
+    int     raw_seg_starts[MAX_SEGMENTS];
+    int     raw_seg_counts[MAX_SEGMENTS];
+    int     raw_num_segments;
 } MapData;
 
 /* Load shapefile and project all vertices. Returns 0 on success. */

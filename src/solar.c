@@ -16,7 +16,7 @@ SubsolarPoint solar_subsolar_point(time_t utc_time)
     /* Solar declination (simplified) */
     double decl = -23.44 * cos(2.0 * M_PI * (day + 10.0) / 365.25);
 
-    /* Subsolar longitude: sun is at lon 0 at 12:00 UTC, moves 15 deg/hr west */
+    /* Subsolar longitude: sun is over lon 0 at 12:00 UTC, moves 15 deg/hr */
     double hours = gm->tm_hour + gm->tm_min / 60.0 + gm->tm_sec / 3600.0;
     double lon = -(hours - 12.0) * 15.0;
 

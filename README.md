@@ -2,7 +2,7 @@
 
 > **W.I.P.** — This project is a work in progress and not very useful yet. Expect rough edges, missing features, and breaking changes.
 
-Interactive azimuthal equidistant map projection viewer. Given a center location, it projects the entire world map centered on that point and draws a line to a target location, showing distance and azimuth information.
+Interactive map projection viewer with two modes: azimuthal equidistant (full Earth) and orthographic (hemisphere sphere view). Given a center location, it projects the world map and draws a line to a target location, showing distance and azimuth information.
 
 ![OpenGL](https://img.shields.io/badge/OpenGL-3.3%2B-blue)
 ![C11](https://img.shields.io/badge/C-11-green)
@@ -10,11 +10,12 @@ Interactive azimuthal equidistant map projection viewer. Given a center location
 
 ## Features
 
-- Azimuthal equidistant projection centered on any point on Earth
+- Two projection modes toggled via "Proj" button:
+  - **Azimuthal equidistant** — full Earth, range rings + radial lines grid
+  - **Orthographic** — hemisphere sphere view, geographic parallels + meridians grid
 - Coastline and country border rendering from Natural Earth shapefiles
 - Great-circle line between center and target locations
 - Distance, azimuth-to, and azimuth-from readout with live local/UTC clocks
-- Center-based range/azimuth grid (concentric rings every 5000 km, radial lines every 30 degrees)
 - Named location labels (optional `-c` / `-t` flags)
 - North pole indicator triangle
 - Real-time day/night overlay with smooth twilight gradient (civil, nautical, astronomical)
@@ -55,6 +56,7 @@ Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/) shape
 |-------|--------|
 | Scroll wheel | Zoom in/out |
 | Left-drag / Arrow keys | Pan |
+| Proj button | Toggle azimuthal equidistant / orthographic projection |
 | R | Reset view |
 | Q / Esc | Quit |
 

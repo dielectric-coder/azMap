@@ -13,4 +13,7 @@ void text_init(void);
 int text_build(const char *str, float x, float y, float size,
                float *out_verts, int max_verts);
 
+/* Compute the rendered width of a string in pixels. */
+float text_width(const char *str, float size);
+
 #endif

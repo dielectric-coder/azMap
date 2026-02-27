@@ -110,10 +110,19 @@ For backward compatibility, a bare fifth positional argument is also accepted as
 
 ## On-Screen Display
 
+### Projection Modes
+
+azMap supports two projection modes, toggled by the **Proj** button in the toolbar:
+
+- **Azimuthal equidistant** (default) — the entire Earth is shown. Distances from the center are true to scale. The grid shows concentric range rings (every 5000 km) and radial azimuth lines (every 30 degrees).
+- **Orthographic** — one hemisphere is shown as if viewed from space. Back-hemisphere geometry is clipped at the horizon. The grid shows geographic parallels (every 30 degrees, -60 to 60) and meridians (every 30 degrees).
+
+All other features (day/night overlay, markers, labels, pan, zoom) work in both modes. The zoom range adapts to the projection radius.
+
 ### Map Elements
 
-- **Dark blue circle** - Earth boundary (antipodal edge)
-- **Dim grid** - Range rings every 5000 km and radial azimuth lines every 30 degrees, centered on your location
+- **Dark blue circle** - Earth boundary
+- **Dim grid** - Range rings + radials (azimuthal equidistant) or parallels + meridians (orthographic)
 - **Gray lines** - Country borders (if data available)
 - **Green lines** - Coastlines
 - **Yellow line** - Great-circle path from center to target
@@ -134,9 +143,10 @@ If no `-c` or `-t` name is given, labels show coordinates only (e.g., `40.42N, 3
 
 | Input | Action |
 |-------|--------|
-| Scroll wheel | Zoom in/out (range: 10 km to 40030 km diameter) |
+| Scroll wheel | Zoom in/out (range: 10 km to full Earth) |
 | Left mouse drag | Pan the map |
 | Arrow keys | Pan the map |
+| Proj button | Toggle azimuthal equidistant / orthographic projection |
 | R | Reset view (full Earth, centered) |
 | Q / Esc | Quit |
 
