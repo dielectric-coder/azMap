@@ -19,6 +19,7 @@ Interactive map projection viewer with two modes: azimuthal equidistant (full Ea
 - Named location labels (optional `-c` / `-t` flags)
 - North pole indicator triangle
 - Real-time day/night overlay with smooth twilight gradient (civil, nautical, astronomical)
+- QRZ callsign lookup with draggable popup panel
 - Smooth zoom (10 km to full Earth) and pan
 - Vector stroke font for all text (no external font dependencies)
 
@@ -58,6 +59,7 @@ Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/) shape
 | Scroll wheel | Zoom in/out |
 | Left-drag / Arrow keys | Pan |
 | Proj button | Toggle azimuthal equidistant / orthographic projection |
+| QRZ button | Open callsign lookup popup (drag title bar to reposition) |
 | R | Reset view |
 | Q / Esc | Quit |
 
@@ -66,7 +68,8 @@ Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/) shape
 This list is tentative and will likely change.
 
 0. ~~Configuration file for QTH (home station location)~~ Done
-1. Mode selection: standalone, WSJT-X query, QRZ lookup
+1. ~~QRZ callsign lookup~~ Done
+2. WSJT-X integration
 
 ## License
 

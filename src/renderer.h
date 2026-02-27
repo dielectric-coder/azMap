@@ -27,6 +27,7 @@ typedef struct {
     unsigned int land_vbo;
     int          land_segment_starts[MAX_SEGMENTS];
     int          land_segment_counts[MAX_SEGMENTS];
+    int          land_segment_clamped[MAX_SEGMENTS];
     int          land_num_segments;
 
     /* Target line (great circle path, center → target) */

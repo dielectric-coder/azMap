@@ -8,6 +8,7 @@ typedef struct {
     int    vertex_count;   /* Total number of vertices */
     int    segment_starts[MAX_SEGMENTS]; /* Start index of each polyline */
     int    segment_counts[MAX_SEGMENTS]; /* Vertex count per polyline */
+    int    segment_clamped[MAX_SEGMENTS]; /* 1 if any vertex was back-hemisphere */
     int    num_segments;
     /* Raw lat/lon for reprojection */
     double *raw_lats;

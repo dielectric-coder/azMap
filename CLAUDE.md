@@ -41,9 +41,13 @@ Optional. Place at `~/.config/azmap.conf`:
 name = Madrid
 lat = 40.4168
 lon = -3.7038
+
+# QRZ.com credentials (optional, for callsign lookup)
+qrz_user = YOURCALL
+qrz_pass = yourpassword
 ```
 
-Lines starting with `#` are comments. Whitespace around `=` is ignored. `lat` and `lon` must both be present to be used. CLI args always override config values.
+Lines starting with `#` are comments. Whitespace around `=` is ignored. `lat` and `lon` must both be present to be used. `qrz_user` and `qrz_pass` enable QRZ callsign lookup. CLI args always override config values.
 
 ### Options
 
@@ -80,7 +84,8 @@ src/
 ├── nightmesh.h/c   Day/night overlay mesh generation (per-vertex alpha)
 ├── renderer.h/c    OpenGL shader compilation, VAO/VBO management, draw calls
 ├── camera.h/c      Orthographic view state (zoom_km, pan offset), MVP matrix
-├── input.h/c       GLFW callbacks: scroll→zoom, drag→pan, keyboard shortcuts
+├── input.h/c       GLFW callbacks: scroll→zoom, drag→pan, popup drag, keyboard shortcuts
+├── ui.h/c          UI system: buttons, draggable popup panel, text input
 └── text.h/c        Vector stroke font for on-screen text (distance/azimuth overlay)
 shaders/
 ├── map.vert        Vertex shader (MVP transform + per-vertex alpha passthrough)
@@ -91,18 +96,20 @@ shaders/
 
 **Coordinate system**: The projection outputs x,y in kilometers from the center point. The camera builds an orthographic matrix mapping km-space to clip space. `zoom_km` controls the visible diameter (10–40030 km).
 
-**Data flow**: Shapefiles are loaded once → raw lat/lon stored in `map_data.c` statics → projected to km via `projection_forward()` → uploaded to GPU as VBOs → drawn as `GL_LINE_STRIP` segments per polyline. Land polygons use `map_data_reproject_nosplit()` with `projection_forward_clamped()` to preserve ring topology for stencil-based fill. Grid geometry is generated procedurally: range rings + radials in km-space for azeq mode (`grid_build()`), or parallels + meridians through `projection_forward()` for ortho mode (`grid_build_geo()`).
+**Data flow**: Shapefiles are loaded once → raw lat/lon stored in `map_data.c` statics → projected to km via `projection_forward()` → uploaded to GPU as VBOs → drawn as `GL_LINE_STRIP` segments per polyline. Land polygons use `map_data_reproject_nosplit()` which clips polygon rings to the front hemisphere (bisecting edges at boundary crossings) then projects with `projection_forward_clamped()`. Grid geometry is generated procedurally: range rings + radials in km-space for azeq mode (`grid_build()`), or parallels + meridians through `projection_forward()` for ortho mode (`grid_build_geo()`).
 
 **Rendering layers** (drawn back to front): Earth filled disc (ocean, dark blue-gray) → land fill (dark green-gray, stencil buffer) → Earth boundary circle (dark blue) → grid rings+radials (dim) → night overlay (semi-transparent, smooth gradient) → country borders (gray) → coastlines (green) → target line (yellow, great circle arc) → center marker (white filled circle) → target marker (red outline circle) → north pole triangle (white) → location labels (cyan/orange, pixel-space) → HUD text overlay (white, pixel-space).
 
-**Land fill**: Uses stencil buffer inversion technique for non-convex polygon fill. Step 1: mark the earth disc in stencil bit 7. Step 2: draw each land polygon ring as `GL_TRIANGLE_FAN` with `GL_INVERT` on lower stencil bits, restricted to disc area via stencil test. Step 3: draw disc with land color where stencil > 0x80 (disc + odd inversions). This handles concave polygons and holes (Caspian Sea, etc.) via the odd-even rule. Back-hemisphere vertices are clamped to the boundary circle via `projection_forward_clamped()`.
+**Land fill**: Uses stencil buffer inversion technique for non-convex polygon fill. Step 1: mark the earth disc in stencil bit 7. Step 2: draw each land polygon ring as `GL_TRIANGLE_FAN` with `GL_INVERT` on lower stencil bits, restricted to disc area via stencil test. Step 3: draw disc with land color where stencil > 0x80 (disc + odd inversions). This handles concave polygons and holes (Caspian Sea, etc.) via the odd-even rule. In ortho mode, `map_data_reproject_nosplit()` clips polygon rings to the front hemisphere: edges crossing the boundary are bisected to find the intersection lat/lon, back-hemisphere vertices are discarded, and boundary crossing points are inserted. This prevents clamped back-hemisphere vertices from corrupting the stencil. Rings entirely in the back hemisphere are skipped. Per-segment `segment_clamped` flags track which segments were skipped.
 
 **Target line**: The center-to-target line is rendered as a great circle arc (101-point `GL_LINE_STRIP`). Intermediate points are computed via spherical linear interpolation (slerp) and projected through `projection_forward_clamped()`. In azeq mode centered on the origin, the great circle naturally appears as a straight line. In ortho mode, it appears as a curved arc.
 
-**Day/night overlay**: `solar.c` computes the subsolar point from system UTC time. `nightmesh.c` generates a polar mesh (180x60) covering the Earth disc using `projection_get_radius()` for the disc extent; each vertex gets a per-vertex alpha based on solar zenith angle using a smoothstep function (transparent at zenith<=80°, max opacity at zenith>=108°). The mesh is regenerated every 60 seconds (and on projection toggle). The vertex shader passes per-vertex alpha to the fragment shader, which multiplies it with the uniform color alpha. Non-night geometry uses a default vertex alpha of 1.0 via `glVertexAttrib1f(1, 1.0f)`.
+**Day/night overlay**: `solar.c` computes the subsolar point from system UTC time. `nightmesh.c` generates a polar mesh (180x60) covering the Earth disc using `projection_get_radius()` for the disc extent (with a small inset to avoid float-precision boundary misses at the limb); each vertex gets a per-vertex alpha based on solar zenith angle using a smoothstep function (transparent at zenith<=80°, max opacity at zenith>=108°). The mesh is regenerated every 60 seconds (and on projection toggle). The vertex shader passes per-vertex alpha to the fragment shader, which multiplies it with the uniform color alpha. Non-night geometry uses a default vertex alpha of 1.0 via `glVertexAttrib1f(1, 1.0f)`.
 
 **Text rendering**: Uses a built-in vector stroke font (`text.c`) — characters are defined as line segments, rendered with GL_LINES using the same shader. No external font dependencies.
 
-**HUD text**: The top-left overlay shows distance/azimuth info and live local/UTC clocks, rebuilt every second in the main loop.
+**HUD text**: The top-center overlay shows distance/azimuth info and live local/UTC clocks (using reentrant `gmtime_r`/`localtime_r`), rebuilt every second in the main loop.
 
 **Labels**: Location labels are rebuilt each frame by projecting marker km-positions through the MVP to screen coordinates, then rendered in pixel-space. The center label is cyan and the target label is orange.
+
+**UI popup**: The `UIPopup` struct stores position offset (`offset_x`, `offset_y`) for drag support. The popup is centered on show (`ui_show_popup()` resets offsets) and can be dragged by its title bar. `input.c` detects title-bar presses via hit-testing the top 30px of the popup bounds, then accumulates cursor deltas into the offset during drag. The `popup_dragging` flag in `InputState` distinguishes popup drags from map pans. Clicks outside the popup pass through to button hit-testing; clicks inside are consumed.

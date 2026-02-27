@@ -60,11 +60,16 @@ You can set a default center location (your QTH) in `~/.config/azmap.conf` so yo
 name = Madrid
 lat = 40.4168
 lon = -3.7038
+
+# QRZ.com credentials (optional, for callsign lookup)
+qrz_user = YOURCALL
+qrz_pass = yourpassword
 ```
 
 - Lines starting with `#` are comments
 - Whitespace around `=` is ignored
 - `lat` and `lon` must both be present to be used; `name` is optional
+- `qrz_user` and `qrz_pass` enable the QRZ callsign lookup feature
 - CLI arguments always override config values
 
 ## Usage
@@ -137,11 +142,21 @@ All other features (day/night overlay, markers, labels, pan, zoom) work in both 
 
 ### Text Overlays
 
-- **Top-left HUD** (white) - Distance in km, azimuth to/from target, local and UTC clocks (updated every second)
+- **Top-center HUD** (white) - Distance in km, azimuth to/from target, local and UTC clocks (updated every second)
 - **Center label** (cyan) - Center location name and coordinates
 - **Target label** (orange) - Target location name and coordinates
 
 If no `-c` or `-t` name is given, labels show coordinates only (e.g., `40.42N, 3.70W`).
+
+### QRZ Lookup Popup
+
+The QRZ button opens a popup panel for looking up amateur radio callsigns. Type a callsign and press Enter to query the QRZ.com XML API. Results show the operator's name, location, grid square, and coordinates, and the target marker/line update automatically.
+
+- The popup can be dragged by its title bar to reposition it
+- Clicking outside the popup passes through to map buttons
+- Press Esc or the X button to close
+- After a lookup, you can backspace and type a new callsign without reopening
+- QRZ credentials (`qrz_user` and `qrz_pass`) must be set in `~/.config/azmap.conf`
 
 ## Controls
 
@@ -151,8 +166,10 @@ If no `-c` or `-t` name is given, labels show coordinates only (e.g., `40.42N, 3
 | Left mouse drag | Pan the map |
 | Arrow keys | Pan the map |
 | Proj button | Toggle azimuthal equidistant / orthographic projection |
+| QRZ button | Open callsign lookup popup |
+| Drag popup title bar | Reposition the popup window |
 | R | Reset view (full Earth, centered) |
-| Q / Esc | Quit |
+| Q / Esc (or Esc in popup) | Quit (or close popup) |
 
 ## Console Output
 

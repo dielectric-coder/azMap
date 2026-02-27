@@ -11,6 +11,7 @@ typedef struct {
 
 typedef struct {
     float x, y, w, h;       /* pixel-space bounds (computed each frame) */
+    float offset_x, offset_y; /* drag offset from center position */
     char  title[32];
     int   visible;
 } UIPopup;

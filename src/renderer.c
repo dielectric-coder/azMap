@@ -149,6 +149,7 @@ void renderer_upload_land(Renderer *r, const MapData *md)
     for (int i = 0; i < md->num_segments; i++) {
         r->land_segment_starts[i] = md->segment_starts[i];
         r->land_segment_counts[i] = md->segment_counts[i];
+        r->land_segment_clamped[i] = md->segment_clamped[i];
     }
 }
 
@@ -480,12 +481,15 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glBindVertexArray(r->disc_vao);
         glDrawArrays(GL_TRIANGLE_FAN, 0, r->disc_vertex_count);
 
-        /* Step 2: draw land rings with INVERT on lower bits, only inside disc */
+        /* Step 2: draw land rings with INVERT on lower bits, only inside disc.
+         * Skip segments with back-hemisphere vertices — clamped vertices
+         * cause the triangle fan to sweep through ocean areas incorrectly. */
         glStencilMask(0x7F);
         glStencilFunc(GL_EQUAL, 0x80, 0x80);
         glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
         glBindVertexArray(r->land_vao);
         for (int i = 0; i < r->land_num_segments; i++) {
+            if (r->land_segment_clamped[i]) continue;
             glDrawArrays(GL_TRIANGLE_FAN,
                          r->land_segment_starts[i],
                          r->land_segment_counts[i]);

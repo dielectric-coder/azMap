@@ -43,7 +43,7 @@ static void emit_vert(NightMesh *nm, float x, float y, float alpha)
 
 void nightmesh_build(NightMesh *nm, const SubsolarPoint *sun)
 {
-    double max_r = projection_get_radius();
+    double max_r = projection_get_radius() - 0.5; /* inset to avoid float-precision boundary miss */
     float dr = (float)(max_r / RADIAL_DIVS);
     float da = 2.0f * (float)M_PI / ANGULAR_DIVS;
 

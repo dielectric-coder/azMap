@@ -17,7 +17,8 @@ src/
   nightmesh.h/c     Day/night overlay mesh generation (per-vertex alpha)
   renderer.h/c      OpenGL shader compilation, VAO/VBO management, draw calls
   camera.h/c        Orthographic view state (zoom, pan), MVP matrix
-  input.h/c         GLFW callbacks: scroll, drag, keyboard
+  input.h/c         GLFW callbacks: scroll, drag, popup drag, keyboard
+  ui.h/c            UI system: buttons, draggable popup panel, text input
   text.h/c          Vector stroke font for on-screen text
 shaders/
   map.vert          Vertex shader (MVP * position, per-vertex alpha passthrough)
@@ -58,9 +59,11 @@ Drawn back to front in `renderer_draw()`:
 | 10 | Target marker | Red (1.0, 0.3, 0.2) | GL_LINE_LOOP |
 | 11 | North pole triangle | White (1.0, 1.0, 1.0) | GL_TRIANGLES |
 | 12 | Location labels | Cyan / Orange | GL_LINES (pixel-space) |
-| 13 | HUD text (dist/az) | White (1.0, 1.0, 1.0) | GL_LINES (pixel-space) |
+| 13 | UI buttons | Variable | GL_TRIANGLES + GL_LINES (pixel-space) |
+| 14 | Popup panel | Variable | GL_TRIANGLES + GL_LINES (pixel-space) |
+| 15 | HUD text (dist/az) | White (1.0, 1.0, 1.0) | GL_LINES (pixel-space) |
 
-Layers 12-13 use a pixel-space orthographic matrix (y-down) instead of the map MVP.
+Layers 12-15 use a pixel-space orthographic matrix (y-down) instead of the map MVP.
 
 ### Land Fill (Stencil Buffer)
 
@@ -70,7 +73,7 @@ Land polygons from `ne_110m_land` are rendered as filled areas using the stencil
 2. **Invert land rings**: Draw each polygon ring as `GL_TRIANGLE_FAN` with `GL_INVERT` on lower stencil bits, only where bit 7 is set
 3. **Color pass**: Draw disc with land color where `stencil > 0x80` (disc bit + odd inversions)
 
-This handles concave polygons and holes (e.g. Caspian Sea) via the odd-even fill rule without triangulation. Land polygons use `map_data_reproject_nosplit()` to preserve ring topology (no segment splitting), and `projection_forward_clamped()` to clamp back-hemisphere vertices to the boundary circle instead of 1e6.
+This handles concave polygons and holes (e.g. Caspian Sea) via the odd-even fill rule without triangulation. Land polygons use `map_data_reproject_nosplit()` which clips polygon rings to the front hemisphere before projection: edges crossing the boundary are bisected (12-iteration binary search in lat/lon) to find the intersection point, back-hemisphere vertices are discarded, and boundary crossing points are inserted. The clipped rings are then projected via `projection_forward_clamped()`. Rings entirely in the back hemisphere are skipped (`segment_clamped` flag). This prevents back-hemisphere vertices from corrupting the stencil with incorrect fan triangles.
 
 ### Great Circle Target Line
 
@@ -87,13 +90,14 @@ The mesh uses 3-component vertices (x, y, alpha). The vertex shader passes the a
 
 ### Key Data Structures
 
-**`MapData`** (`map_data.h`) - shared by coastlines, borders, and grid:
+**`MapData`** (`map_data.h`) - shared by coastlines, borders, land, and grid:
 ```c
 typedef struct {
-    float *vertices;                   // x,y pairs in km
+    float *vertices;                     // x,y pairs in km
     int    vertex_count;
     int    segment_starts[MAX_SEGMENTS]; // start index per polyline
     int    segment_counts[MAX_SEGMENTS]; // vertex count per polyline
+    int    segment_clamped[MAX_SEGMENTS]; // 1 if ring was clipped/skipped (land only)
     int    num_segments;
 } MapData;
 ```
@@ -157,7 +161,7 @@ API:
 
 ### Antipodal / Back-Hemisphere Handling
 
-In azimuthal equidistant mode, points near the antipode produce large jumps in km-space. In orthographic mode, back-hemisphere points are set to 1e6 km. In both cases, `map_data.c` splits polyline segments where consecutive projected points are more than 5000 km apart, preventing visual artifacts. Land polygons use a separate path: `map_data_reproject_nosplit()` preserves original ring topology (needed for stencil fill) and uses `projection_forward_clamped()` which clamps back-hemisphere points to the boundary circle.
+In azimuthal equidistant mode, points near the antipode produce large jumps in km-space. In orthographic mode, back-hemisphere points are set to 1e6 km. In both cases, `map_data.c` splits polyline segments where consecutive projected points are more than 5000 km apart, preventing visual artifacts. Land polygons use a separate path: `map_data_reproject_nosplit()` clips each polygon ring to the front hemisphere by bisecting boundary-crossing edges (finding the lat/lon where `projection_forward()` transitions from front to back), discarding back-hemisphere vertices, and inserting intersection points. The clipped rings are then projected via `projection_forward_clamped()`. This preserves ring topology for stencil fill while preventing back-hemisphere vertices from creating incorrect stencil inversions.
 
 ## Building
 

@@ -9,6 +9,7 @@ typedef struct {
     Camera *cam;
     UI     *ui;
     int     dragging;
+    int     popup_dragging;  /* dragging popup title bar */
     int     pressed;         /* left button currently held */
     double  press_x;         /* cursor pos at press (screen coords) */
     double  press_y;

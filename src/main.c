@@ -694,7 +694,6 @@ int main(int argc, char **argv)
                              "GRID: %.10s  %.24s", upper_grid, coord);
                 }
                 ui.popup_result_lines = 4;
-                ui.popup_input_active = 0;
             } else {
                 /* Error */
                 char upper_err[64];
@@ -713,8 +712,9 @@ int main(int argc, char **argv)
             time_t now = time(NULL);
             if (now != last_text_update) {
                 last_text_update = now;
-                struct tm *gt = gmtime(&now);
-                struct tm *lt = localtime(&now);
+                struct tm gt_buf, lt_buf;
+                struct tm *gt = gmtime_r(&now, &gt_buf);
+                struct tm *lt = localtime_r(&now, &lt_buf);
                 if (!gt || !lt) continue;
                 char line1[128], line2[128];
                 snprintf(line1, sizeof(line1),

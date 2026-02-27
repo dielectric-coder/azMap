@@ -108,6 +108,19 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
             g_input->last_mouse_y = my;
             g_input->pressed = 1;
             g_input->dragging = 0;
+            g_input->popup_dragging = 0;
+
+            /* Check if press is on popup title bar */
+            if (g_input->ui && g_input->ui->popup.visible) {
+                float fb_x = (float)mx * g_input->cursor_scale_x;
+                float fb_y = (float)my * g_input->cursor_scale_y;
+                UIPopup *p = &g_input->ui->popup;
+                float title_h = 30.0f;
+                if (fb_x >= p->x && fb_x <= p->x + p->w &&
+                    fb_y >= p->y && fb_y <= p->y + title_h) {
+                    g_input->popup_dragging = 1;
+                }
+            }
         } else {
             /* Release: if no drag occurred, treat as click */
             if (g_input->pressed && !g_input->dragging && g_input->ui) {
@@ -117,15 +130,21 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
                 /* Popup intercepts clicks when visible */
                 if (g_input->ui->popup.visible) {
                     UI *u = g_input->ui;
+                    UIPopup *p = &u->popup;
                     /* Close button hit test */
                     if (fb_x >= u->popup_close_x &&
                         fb_x <= u->popup_close_x + u->popup_close_w &&
                         fb_y >= u->popup_close_y &&
                         fb_y <= u->popup_close_y + u->popup_close_h) {
                         ui_hide_popup(u);
+                    } else if (fb_x < p->x || fb_x > p->x + p->w ||
+                               fb_y < p->y || fb_y > p->y + p->h) {
+                        /* Click outside popup — pass through to buttons */
+                        int hit = ui_hit_test(u, fb_x, fb_y);
+                        if (hit >= 0)
+                            u->clicked = hit;
                     }
-                    /* Click inside popup body — consume (don't pass to buttons) */
-                    /* Click outside popup — also ignore buttons */
+                    /* Click inside popup body — consume */
                 } else {
                     int hit = ui_hit_test(g_input->ui, fb_x, fb_y);
                     if (hit >= 0)
@@ -134,6 +153,7 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
             }
             g_input->pressed = 0;
             g_input->dragging = 0;
+            g_input->popup_dragging = 0;
         }
     }
 }
@@ -162,6 +182,18 @@ static void cursor_pos_callback(GLFWwindow *window, double xpos, double ypos)
     }
 
     if (!g_input->pressed) return;
+
+    /* Popup title bar drag */
+    if (g_input->popup_dragging) {
+        double dx = xpos - g_input->last_mouse_x;
+        double dy = ypos - g_input->last_mouse_y;
+        g_input->last_mouse_x = xpos;
+        g_input->last_mouse_y = ypos;
+        g_input->ui->popup.offset_x += (float)dx * g_input->cursor_scale_x;
+        g_input->ui->popup.offset_y += (float)dy * g_input->cursor_scale_y;
+        g_input->dragging = 1; /* suppress click on release */
+        return;
+    }
 
     /* Check drag threshold before starting to pan */
     if (!g_input->dragging) {
@@ -221,6 +253,7 @@ void input_init(InputState *is, GLFWwindow *window, Camera *cam, UI *ui,
     is->cam = cam;
     is->ui = ui;
     is->dragging = 0;
+    is->popup_dragging = 0;
     is->pressed = 0;
     is->press_x = 0;
     is->press_y = 0;

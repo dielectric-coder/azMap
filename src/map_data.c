@@ -148,24 +148,127 @@ int map_data_load(MapData *md, const char *shp_path)
     return 0;
 }
 
+/* Find the lat/lon where a line segment crosses the hemisphere boundary.
+ * Uses bisection: a_back indicates which endpoint is back-hemisphere. */
+static void find_boundary_crossing(double lat_a, double lon_a, int a_back,
+                                   double lat_b, double lon_b,
+                                   double *out_lat, double *out_lon)
+{
+    double t_lo = 0.0, t_hi = 1.0;
+    for (int i = 0; i < 12; i++) {
+        double t = (t_lo + t_hi) * 0.5;
+        double lat = lat_a + t * (lat_b - lat_a);
+        double lon = lon_a + t * (lon_b - lon_a);
+        double x, y;
+        int mid_back = (projection_forward(lat, lon, &x, &y) != 0);
+        if (mid_back == a_back)
+            t_lo = t;
+        else
+            t_hi = t;
+    }
+    double t = (t_lo + t_hi) * 0.5;
+    *out_lat = lat_a + t * (lat_b - lat_a);
+    *out_lon = lon_a + t * (lon_b - lon_a);
+}
+
 static void project_nosplit(MapData *md)
 {
     free(md->vertices);
-    md->vertices = malloc(md->raw_count * 2 * sizeof(float));
+
+    /* Check each raw vertex for back-hemisphere */
+    int *back = malloc(md->raw_count * sizeof(int));
     for (int i = 0; i < md->raw_count; i++) {
         double x, y;
-        projection_forward_clamped(md->raw_lats[i], md->raw_lons[i], &x, &y);
+        back[i] = (projection_forward(md->raw_lats[i], md->raw_lons[i], &x, &y) != 0);
+    }
+
+    /* Build clipped rings — each edge can add one intersection vertex */
+    int max_out = md->raw_count * 2;
+    double *clip_lats = malloc(max_out * sizeof(double));
+    double *clip_lons = malloc(max_out * sizeof(double));
+    int clip_count = 0;
+
+    md->num_segments = md->raw_num_segments;
+
+    for (int s = 0; s < md->raw_num_segments; s++) {
+        int base = md->raw_seg_starts[s];
+        int count = md->raw_seg_counts[s];
+        int ring_start = clip_count;
+
+        /* Check for back-hemisphere vertices */
+        int has_back = 0, has_front = 0;
+        for (int v = 0; v < count; v++) {
+            if (back[base + v]) has_back = 1; else has_front = 1;
+        }
+
+        if (!has_front) {
+            /* Entirely back-hemisphere — skip */
+            md->segment_starts[s] = ring_start;
+            md->segment_counts[s] = 0;
+            md->segment_clamped[s] = 1;
+            continue;
+        }
+
+        md->segment_clamped[s] = 0;
+
+        if (!has_back) {
+            /* Entirely front-hemisphere — copy as-is */
+            for (int v = 0; v < count; v++) {
+                clip_lats[clip_count] = md->raw_lats[base + v];
+                clip_lons[clip_count] = md->raw_lons[base + v];
+                clip_count++;
+            }
+        } else {
+            /* Clip: emit front vertices and boundary crossings, skip back vertices */
+            for (int v = 0; v < count; v++) {
+                int ci = base + v;
+                int ni = base + (v + 1) % count;
+
+                if (!back[ci]) {
+                    clip_lats[clip_count] = md->raw_lats[ci];
+                    clip_lons[clip_count] = md->raw_lons[ci];
+                    clip_count++;
+                }
+
+                if (back[ci] != back[ni]) {
+                    double blat, blon;
+                    find_boundary_crossing(
+                        md->raw_lats[ci], md->raw_lons[ci], back[ci],
+                        md->raw_lats[ni], md->raw_lons[ni],
+                        &blat, &blon);
+                    clip_lats[clip_count] = blat;
+                    clip_lons[clip_count] = blon;
+                    clip_count++;
+                }
+            }
+        }
+
+        int seg_count = clip_count - ring_start;
+        if (seg_count < 3) {
+            /* Too few vertices for a triangle fan — discard */
+            clip_count = ring_start;
+            md->segment_starts[s] = ring_start;
+            md->segment_counts[s] = 0;
+            md->segment_clamped[s] = 1;
+        } else {
+            md->segment_starts[s] = ring_start;
+            md->segment_counts[s] = seg_count;
+        }
+    }
+
+    /* Project clipped vertices */
+    md->vertices = malloc(clip_count * 2 * sizeof(float));
+    for (int i = 0; i < clip_count; i++) {
+        double x, y;
+        projection_forward_clamped(clip_lats[i], clip_lons[i], &x, &y);
         md->vertices[i * 2]     = (float)x;
         md->vertices[i * 2 + 1] = (float)y;
     }
-    md->vertex_count = md->raw_count;
+    md->vertex_count = clip_count;
 
-    /* Copy raw segment structure directly (no splitting) */
-    md->num_segments = md->raw_num_segments;
-    for (int i = 0; i < md->raw_num_segments; i++) {
-        md->segment_starts[i] = md->raw_seg_starts[i];
-        md->segment_counts[i] = md->raw_seg_counts[i];
-    }
+    free(clip_lats);
+    free(clip_lons);
+    free(back);
 }
 
 void map_data_reproject_nosplit(MapData *md)
