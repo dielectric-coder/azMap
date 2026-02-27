@@ -13,8 +13,8 @@ Interactive map projection viewer with two modes: azimuthal equidistant (full Ea
 - Two projection modes toggled via "Proj" button:
   - **Azimuthal equidistant** — full Earth, range rings + radial lines grid
   - **Orthographic** — hemisphere sphere view, geographic parallels + meridians grid
-- Coastline and country border rendering from Natural Earth shapefiles
-- Great-circle line between center and target locations
+- Filled land masses (stencil-buffer polygon fill) with coastline and country border outlines
+- Great-circle line between center and target locations (curved arc in orthographic mode)
 - Distance, azimuth-to, and azimuth-from readout with live local/UTC clocks
 - Named location labels (optional `-c` / `-t` flags)
 - North pole indicator triangle
@@ -48,6 +48,7 @@ Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/) shape
 | Layer | Required | Source |
 |-------|----------|--------|
 | `ne_110m_coastline` | Yes | [110m physical vectors](https://www.naturalearthdata.com/downloads/110m-physical-vectors/) |
+| `ne_110m_land` | No | [110m physical vectors](https://www.naturalearthdata.com/downloads/110m-physical-vectors/) |
 | `ne_110m_admin_0_boundary_lines_land` | No | [110m cultural vectors](https://www.naturalearthdata.com/downloads/110m-cultural-vectors/) |
 
 ## Controls

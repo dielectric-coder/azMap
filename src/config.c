@@ -19,6 +19,8 @@ int config_load(Config *cfg)
     cfg->lat = 0.0;
     cfg->lon = 0.0;
     cfg->valid = 0;
+    cfg->qrz_user[0] = '\0';
+    cfg->qrz_pass[0] = '\0';
 
     const char *home = getenv("HOME");
     if (!home) return -1;
@@ -55,6 +57,12 @@ int config_load(Config *cfg)
         } else if (strcmp(key, "lon") == 0) {
             cfg->lon = atof(val);
             has_lon = 1;
+        } else if (strcmp(key, "qrz_user") == 0) {
+            strncpy(cfg->qrz_user, val, sizeof(cfg->qrz_user) - 1);
+            cfg->qrz_user[sizeof(cfg->qrz_user) - 1] = '\0';
+        } else if (strcmp(key, "qrz_pass") == 0) {
+            strncpy(cfg->qrz_pass, val, sizeof(cfg->qrz_pass) - 1);
+            cfg->qrz_pass[sizeof(cfg->qrz_pass) - 1] = '\0';
         }
     }
 

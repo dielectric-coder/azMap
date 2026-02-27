@@ -57,6 +57,7 @@ For backward compatibility, a bare fifth argument is still accepted as the shape
 
 Download and extract into `data/`:
 - **Coastlines** (required): `ne_110m_coastline` from [110m physical vectors](https://www.naturalearthdata.com/downloads/110m-physical-vectors/)
+- **Land polygons** (optional): `ne_110m_land` from [110m physical vectors](https://www.naturalearthdata.com/downloads/110m-physical-vectors/)
 - **Country borders** (optional): `ne_110m_admin_0_boundary_lines_land` from [110m cultural vectors](https://www.naturalearthdata.com/downloads/110m-cultural-vectors/)
 
 ## Controls
@@ -86,13 +87,17 @@ shaders/
 └── map.frag        Fragment shader (uniform color * vertex alpha)
 ```
 
-**Projection modes**: Two modes selectable via the "Proj" UI button. Azimuthal equidistant (`PROJ_AZEQ`) maps the entire Earth to a disc of radius ~20015 km. Orthographic (`PROJ_ORTHO`) shows one hemisphere as a sphere of radius 6371 km; back-hemisphere points are clipped (return -1, coords set to 1e6 triggering the split threshold). `projection_get_radius()` returns the mode-appropriate Earth radius.
+**Projection modes**: Two modes selectable via the "Proj" UI button. Azimuthal equidistant (`PROJ_AZEQ`) maps the entire Earth to a disc of radius ~20015 km. Orthographic (`PROJ_ORTHO`) shows one hemisphere as a sphere of radius 6371 km; back-hemisphere points are clipped (return -1, coords set to 1e6 triggering the split threshold). `projection_forward_clamped()` is an alternative that clamps ortho back-hemisphere points to the boundary circle instead of 1e6 — used by land polygon fill and the great circle target line. `projection_get_radius()` returns the mode-appropriate Earth radius.
 
 **Coordinate system**: The projection outputs x,y in kilometers from the center point. The camera builds an orthographic matrix mapping km-space to clip space. `zoom_km` controls the visible diameter (10–40030 km).
 
-**Data flow**: Shapefiles are loaded once → raw lat/lon stored in `map_data.c` statics → projected to km via `projection_forward()` → uploaded to GPU as VBOs → drawn as `GL_LINE_STRIP` segments per polyline. Grid geometry is generated procedurally: range rings + radials in km-space for azeq mode (`grid_build()`), or parallels + meridians through `projection_forward()` for ortho mode (`grid_build_geo()`).
+**Data flow**: Shapefiles are loaded once → raw lat/lon stored in `map_data.c` statics → projected to km via `projection_forward()` → uploaded to GPU as VBOs → drawn as `GL_LINE_STRIP` segments per polyline. Land polygons use `map_data_reproject_nosplit()` with `projection_forward_clamped()` to preserve ring topology for stencil-based fill. Grid geometry is generated procedurally: range rings + radials in km-space for azeq mode (`grid_build()`), or parallels + meridians through `projection_forward()` for ortho mode (`grid_build_geo()`).
 
-**Rendering layers** (drawn back to front): Earth filled disc (dark blue-gray) → Earth boundary circle (dark blue) → grid rings+radials (dim) → night overlay (semi-transparent, smooth gradient) → country borders (gray) → coastlines (green) → target line (yellow) → center marker (white filled circle) → target marker (red outline circle) → north pole triangle (white) → location labels (cyan/orange, pixel-space) → HUD text overlay (white, pixel-space).
+**Rendering layers** (drawn back to front): Earth filled disc (ocean, dark blue-gray) → land fill (dark green-gray, stencil buffer) → Earth boundary circle (dark blue) → grid rings+radials (dim) → night overlay (semi-transparent, smooth gradient) → country borders (gray) → coastlines (green) → target line (yellow, great circle arc) → center marker (white filled circle) → target marker (red outline circle) → north pole triangle (white) → location labels (cyan/orange, pixel-space) → HUD text overlay (white, pixel-space).
+
+**Land fill**: Uses stencil buffer inversion technique for non-convex polygon fill. Step 1: mark the earth disc in stencil bit 7. Step 2: draw each land polygon ring as `GL_TRIANGLE_FAN` with `GL_INVERT` on lower stencil bits, restricted to disc area via stencil test. Step 3: draw disc with land color where stencil > 0x80 (disc + odd inversions). This handles concave polygons and holes (Caspian Sea, etc.) via the odd-even rule. Back-hemisphere vertices are clamped to the boundary circle via `projection_forward_clamped()`.
+
+**Target line**: The center-to-target line is rendered as a great circle arc (101-point `GL_LINE_STRIP`). Intermediate points are computed via spherical linear interpolation (slerp) and projected through `projection_forward_clamped()`. In azeq mode centered on the origin, the great circle naturally appears as a straight line. In ortho mode, it appears as a curved arc.
 
 **Day/night overlay**: `solar.c` computes the subsolar point from system UTC time. `nightmesh.c` generates a polar mesh (180x60) covering the Earth disc using `projection_get_radius()` for the disc extent; each vertex gets a per-vertex alpha based on solar zenith angle using a smoothstep function (transparent at zenith<=80°, max opacity at zenith>=108°). The mesh is regenerated every 60 seconds (and on projection toggle). The vertex shader passes per-vertex alpha to the fragment shader, which multiplies it with the uniform color alpha. Non-night geometry uses a default vertex alpha of 1.0 via `glVertexAttrib1f(1, 1.0f)`.
 

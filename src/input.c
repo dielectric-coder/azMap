@@ -1,6 +1,7 @@
 #include "input.h"
 #include "projection.h"
 #include <math.h>
+#include <ctype.h>
 
 static InputState *g_input = NULL;
 
@@ -12,11 +13,45 @@ static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
     camera_zoom(g_input->cam, factor);
 }
 
+static void char_callback(GLFWwindow *window, unsigned int codepoint)
+{
+    (void)window;
+    if (!g_input || !g_input->ui) return;
+    UI *u = g_input->ui;
+    if (!u->popup.visible || !u->popup_input_active) return;
+
+    char ch = (char)toupper((unsigned char)codepoint);
+    /* Accept A-Z, 0-9, / */
+    if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '/') {
+        if (u->popup_input_len < 31) {
+            u->popup_input[u->popup_input_len++] = ch;
+            u->popup_input[u->popup_input_len] = '\0';
+        }
+    }
+}
+
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     (void)scancode;
     (void)mods;
     if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
+
+    /* When popup input is active, handle text editing keys and suppress others */
+    if (g_input->ui && g_input->ui->popup.visible && g_input->ui->popup_input_active) {
+        UI *u = g_input->ui;
+        if (key == GLFW_KEY_BACKSPACE) {
+            if (u->popup_input_len > 0) {
+                u->popup_input[--u->popup_input_len] = '\0';
+            }
+        } else if (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER) {
+            if (u->popup_input_len > 0) {
+                u->popup_submitted = 1;
+            }
+        } else if (key == GLFW_KEY_ESCAPE) {
+            ui_hide_popup(u);
+        }
+        return; /* suppress all other keys */
+    }
 
     float step_km = g_input->cam->zoom_km * 0.05f;
     float km_per_deg = (float)(EARTH_RADIUS_KM * M_PI / 180.0);
@@ -209,6 +244,7 @@ void input_init(InputState *is, GLFWwindow *window, Camera *cam, UI *ui,
 
     glfwSetScrollCallback(window, scroll_callback);
     glfwSetKeyCallback(window, key_callback);
+    glfwSetCharCallback(window, char_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_pos_callback);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);

@@ -6,6 +6,8 @@ typedef struct {
     double lat;
     double lon;
     int valid; /* 1 if both lat and lon were found */
+    char qrz_user[64];
+    char qrz_pass[64];
 } Config;
 
 /* Load config from ~/.config/azmap.conf. Returns 0 on success, -1 if not found/error. */

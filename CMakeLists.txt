@@ -8,6 +8,7 @@ find_package(OpenGL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLFW3 REQUIRED glfw3)
 pkg_check_modules(GLEW REQUIRED glew)
+pkg_check_modules(CURL REQUIRED libcurl)
 
 # shapelib - try pkg-config first, fall back to find_library
 pkg_check_modules(SHAPELIB shapelib)
@@ -32,12 +33,14 @@ add_executable(azmap
     src/solar.c
     src/nightmesh.c
     src/ui.c
+    src/qrz.c
 )
 
 target_include_directories(azmap PRIVATE
     ${GLFW3_INCLUDE_DIRS}
     ${GLEW_INCLUDE_DIRS}
     ${SHAPELIB_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
     ${OPENGL_INCLUDE_DIR}
 )
 
@@ -45,6 +48,7 @@ target_link_libraries(azmap PRIVATE
     ${GLFW3_LIBRARIES}
     ${GLEW_LIBRARIES}
     ${SHAPELIB_LIBRARIES}
+    ${CURL_LIBRARIES}
     OpenGL::GL
     m
 )

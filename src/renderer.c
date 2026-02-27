@@ -131,19 +131,40 @@ void renderer_upload_borders(Renderer *r, const MapData *md)
     }
 }
 
-void renderer_upload_target_line(Renderer *r, float cx, float cy, float tx, float ty)
+void renderer_upload_land(Renderer *r, const MapData *md)
 {
-    float verts[] = { cx, cy, tx, ty };
+    if (!r->land_vao) {
+        glGenVertexArrays(1, &r->land_vao);
+        glGenBuffers(1, &r->land_vbo);
+    }
+    glBindVertexArray(r->land_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->land_vbo);
+    glBufferData(GL_ARRAY_BUFFER, md->vertex_count * 2 * sizeof(float),
+                 md->vertices, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+
+    r->land_num_segments = md->num_segments;
+    for (int i = 0; i < md->num_segments; i++) {
+        r->land_segment_starts[i] = md->segment_starts[i];
+        r->land_segment_counts[i] = md->segment_counts[i];
+    }
+}
+
+void renderer_upload_target_line(Renderer *r, const float *verts, int vertex_count)
+{
     if (!r->line_vao) {
         glGenVertexArrays(1, &r->line_vao);
         glGenBuffers(1, &r->line_vbo);
     }
     glBindVertexArray(r->line_vao);
     glBindBuffer(GL_ARRAY_BUFFER, r->line_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertex_count * 2 * sizeof(float), verts, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
     glBindVertexArray(0);
+    r->line_vertex_count = vertex_count;
 }
 
 void renderer_upload_markers(Renderer *r, float cx, float cy, float tx, float ty, float size_km)
@@ -431,7 +452,7 @@ void renderer_upload_text(Renderer *r, float *verts, int vertex_count)
 
 void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
 {
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     glUseProgram(r->program);
     glUniformMatrix4fv(r->mvp_loc, 1, GL_FALSE, mvp);
 
@@ -443,6 +464,44 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glUniform4f(r->color_loc, 0.12f, 0.12f, 0.25f, 1.0f);
         glBindVertexArray(r->disc_vao);
         glDrawArrays(GL_TRIANGLE_FAN, 0, r->disc_vertex_count);
+    }
+
+    /* Land fill via stencil buffer (odd-even rule, clipped to disc).
+     * Uses stencil bit 7 to mask the disc area so back-hemisphere
+     * vertices (projected to 1e6) don't corrupt the stencil. */
+    if (r->land_vao && r->land_num_segments > 0 && r->disc_vao) {
+        glEnable(GL_STENCIL_TEST);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
+        /* Step 1: mark disc area in stencil bit 7 */
+        glStencilMask(0x80);
+        glStencilFunc(GL_ALWAYS, 0x80, 0x80);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        glBindVertexArray(r->disc_vao);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, r->disc_vertex_count);
+
+        /* Step 2: draw land rings with INVERT on lower bits, only inside disc */
+        glStencilMask(0x7F);
+        glStencilFunc(GL_EQUAL, 0x80, 0x80);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
+        glBindVertexArray(r->land_vao);
+        for (int i = 0; i < r->land_num_segments; i++) {
+            glDrawArrays(GL_TRIANGLE_FAN,
+                         r->land_segment_starts[i],
+                         r->land_segment_counts[i]);
+        }
+
+        /* Step 3: draw land color where disc+land bits are set (stencil > 0x80) */
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glStencilMask(0x00);
+        glStencilFunc(GL_LESS, 0x80, 0xFF);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        glUniform4f(r->color_loc, 0.12f, 0.15f, 0.10f, 1.0f);
+        glBindVertexArray(r->disc_vao);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, r->disc_vertex_count);
+
+        glStencilMask(0xFF);
+        glDisable(GL_STENCIL_TEST);
     }
 
     /* Earth boundary circle - dark blue */
@@ -492,11 +551,11 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         }
     }
 
-    /* Target line - yellow */
-    if (r->line_vao) {
+    /* Target line - yellow (great circle path) */
+    if (r->line_vao && r->line_vertex_count > 1) {
         glUniform4f(r->color_loc, 1.0f, 0.9f, 0.2f, 1.0f);
         glBindVertexArray(r->line_vao);
-        glDrawArrays(GL_LINES, 0, 2);
+        glDrawArrays(GL_LINE_STRIP, 0, r->line_vertex_count);
     }
 
     /* Center marker - white filled circle */
@@ -594,6 +653,11 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
             else
                 glUniform4f(r->color_loc, 0.25f, 0.12f, 0.12f, 0.92f);
             glDrawArrays(GL_TRIANGLES, 12, 6);
+            /* Quad 3: input box (if present) */
+            if (r->popup_bg_vertex_count > 18) {
+                glUniform4f(r->color_loc, 0.04f, 0.04f, 0.08f, 0.95f);
+                glDrawArrays(GL_TRIANGLES, 18, 6);
+            }
         }
 
         /* Popup text */
@@ -619,6 +683,7 @@ void renderer_destroy(Renderer *r)
     glDeleteProgram(r->program);
     if (r->map_vao) { glDeleteVertexArrays(1, &r->map_vao); glDeleteBuffers(1, &r->map_vbo); }
     if (r->border_vao) { glDeleteVertexArrays(1, &r->border_vao); glDeleteBuffers(1, &r->border_vbo); }
+    if (r->land_vao) { glDeleteVertexArrays(1, &r->land_vao); glDeleteBuffers(1, &r->land_vbo); }
     if (r->line_vao) { glDeleteVertexArrays(1, &r->line_vao); glDeleteBuffers(1, &r->line_vbo); }
     if (r->npole_vao) { glDeleteVertexArrays(1, &r->npole_vao); glDeleteBuffers(1, &r->npole_vbo); }
     if (r->center_marker_vao) { glDeleteVertexArrays(1, &r->center_marker_vao); glDeleteBuffers(1, &r->center_marker_vbo); }

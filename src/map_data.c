@@ -148,6 +148,32 @@ int map_data_load(MapData *md, const char *shp_path)
     return 0;
 }
 
+static void project_nosplit(MapData *md)
+{
+    free(md->vertices);
+    md->vertices = malloc(md->raw_count * 2 * sizeof(float));
+    for (int i = 0; i < md->raw_count; i++) {
+        double x, y;
+        projection_forward_clamped(md->raw_lats[i], md->raw_lons[i], &x, &y);
+        md->vertices[i * 2]     = (float)x;
+        md->vertices[i * 2 + 1] = (float)y;
+    }
+    md->vertex_count = md->raw_count;
+
+    /* Copy raw segment structure directly (no splitting) */
+    md->num_segments = md->raw_num_segments;
+    for (int i = 0; i < md->raw_num_segments; i++) {
+        md->segment_starts[i] = md->raw_seg_starts[i];
+        md->segment_counts[i] = md->raw_seg_counts[i];
+    }
+}
+
+void map_data_reproject_nosplit(MapData *md)
+{
+    if (md->raw_count > 0)
+        project_nosplit(md);
+}
+
 void map_data_reproject(MapData *md, const char *shp_path)
 {
     (void)shp_path;

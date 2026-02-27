@@ -41,12 +41,15 @@ data/
     ne_110m_coastline.shp
     ne_110m_coastline.shx
     ne_110m_coastline.dbf
-  ne_110m_admin_0_boundary_lines_land/   (optional)
+  ne_110m_land/                          (optional — filled land masses)
+    ne_110m_land.shp
+    ...
+  ne_110m_admin_0_boundary_lines_land/   (optional — country borders)
     ne_110m_admin_0_boundary_lines_land.shp
     ...
 ```
 
-Coastlines are required. Country borders are optional and will be silently skipped if not found.
+Coastlines are required. Land polygons and country borders are optional and will be silently skipped if not found.
 
 ## Config File
 
@@ -122,10 +125,11 @@ All other features (day/night overlay, markers, labels, pan, zoom) work in both 
 ### Map Elements
 
 - **Dark blue circle** - Earth boundary
+- **Filled land** - Dark green-gray land masses (if `ne_110m_land` data available)
 - **Dim grid** - Range rings + radials (azimuthal equidistant) or parallels + meridians (orthographic)
 - **Gray lines** - Country borders (if data available)
 - **Green lines** - Coastlines
-- **Yellow line** - Great-circle path from center to target
+- **Yellow line** - Great-circle path from center to target (curved arc in orthographic mode)
 - **White filled circle** - Center location marker
 - **Red outline circle** - Target location marker
 - **White triangle** - North pole indicator

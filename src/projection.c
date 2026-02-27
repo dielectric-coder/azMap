@@ -81,6 +81,53 @@ int projection_forward(double lat_deg, double lon_deg, double *x, double *y)
     return 0;
 }
 
+int projection_forward_clamped(double lat_deg, double lon_deg, double *x, double *y)
+{
+    double lat = lat_deg * DEG2RAD;
+    double lon = lon_deg * DEG2RAD;
+    double dlon = lon - center_lon_rad;
+
+    double sin_lat = sin(lat);
+    double cos_lat = cos(lat);
+    double cos_dlon = cos(dlon);
+
+    double cos_c = sin_clat * sin_lat + cos_clat * cos_lat * cos_dlon;
+    if (cos_c > 1.0) cos_c = 1.0;
+    if (cos_c < -1.0) cos_c = -1.0;
+
+    if (proj_mode == PROJ_ORTHO) {
+        double px = EARTH_RADIUS_KM * cos_lat * sin(dlon);
+        double py = EARTH_RADIUS_KM * (cos_clat * sin_lat - sin_clat * cos_lat * cos_dlon);
+        if (cos_c <= 0.0) {
+            /* Back hemisphere — clamp to boundary circle */
+            double r = sqrt(px * px + py * py);
+            if (r > 1e-6) {
+                *x = px * (EARTH_RADIUS_KM / r);
+                *y = py * (EARTH_RADIUS_KM / r);
+            } else {
+                *x = EARTH_RADIUS_KM;
+                *y = 0.0;
+            }
+        } else {
+            *x = px;
+            *y = py;
+        }
+        return 0;
+    }
+
+    /* Azimuthal equidistant — same as projection_forward */
+    double c = acos(cos_c);
+    if (c < 1e-10) {
+        *x = 0.0;
+        *y = 0.0;
+        return 0;
+    }
+    double k = (c / sin(c)) * EARTH_RADIUS_KM;
+    *x = k * cos_lat * sin(dlon);
+    *y = k * (cos_clat * sin_lat - sin_clat * cos_lat * cos_dlon);
+    return 0;
+}
+
 int projection_inverse(double x, double y, double *lat_deg, double *lon_deg)
 {
     double rho = sqrt(x * x + y * y);

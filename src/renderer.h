@@ -22,9 +22,17 @@ typedef struct {
     int          border_segment_counts[MAX_SEGMENTS];
     int          border_num_segments;
 
-    /* Target line (center → target) */
+    /* Land polygons (filled via stencil buffer) */
+    unsigned int land_vao;
+    unsigned int land_vbo;
+    int          land_segment_starts[MAX_SEGMENTS];
+    int          land_segment_counts[MAX_SEGMENTS];
+    int          land_num_segments;
+
+    /* Target line (great circle path, center → target) */
     unsigned int line_vao;
     unsigned int line_vbo;
+    int          line_vertex_count;
 
     /* Center marker (filled circle — GL_TRIANGLE_FAN) */
     unsigned int center_marker_vao;
@@ -108,8 +116,11 @@ void renderer_upload_map(Renderer *r, const MapData *md);
 /* Upload country border data to GPU. */
 void renderer_upload_borders(Renderer *r, const MapData *md);
 
-/* Upload target line (two endpoints in km). */
-void renderer_upload_target_line(Renderer *r, float cx, float cy, float tx, float ty);
+/* Upload land polygon data to GPU (for stencil-based fill). */
+void renderer_upload_land(Renderer *r, const MapData *md);
+
+/* Upload target line vertices (great circle path in km-space). */
+void renderer_upload_target_line(Renderer *r, const float *verts, int vertex_count);
 
 /* Upload markers: filled circle at center, outline circle at target. */
 void renderer_upload_markers(Renderer *r, float cx, float cy, float tx, float ty, float size_km);

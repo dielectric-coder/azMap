@@ -21,11 +21,13 @@
 #include "solar.h"
 #include "nightmesh.h"
 #include "ui.h"
+#include "qrz.h"
 
 #define DEFAULT_WIDTH  800
 #define DEFAULT_HEIGHT 800
 #define DEFAULT_SHP_REL "data/ne_110m_coastline/ne_110m_coastline.shp"
 #define DEFAULT_BORDER_REL "data/ne_110m_admin_0_boundary_lines_land/ne_110m_admin_0_boundary_lines_land.shp"
+#define DEFAULT_LAND_REL "data/ne_110m_land/ne_110m_land.shp"
 #define DEFAULT_SHADER_REL "shaders"
 
 /* Resolve a path relative to the executable's directory. */
@@ -93,6 +95,53 @@ static int build_label_bg(float x, float y, float w, float h, float pad,
     return 6;
 }
 
+/* Build great circle path vertices between two lat/lon points.
+ * Uses projection_forward_clamped so the path stays on/at the disc boundary.
+ * Returns number of vertices written. */
+#define GC_LINE_POINTS 101
+static int build_gc_line(double lat1, double lon1, double lat2, double lon2,
+                          float *verts)
+{
+    double phi1 = lat1 * M_PI / 180.0, lam1 = lon1 * M_PI / 180.0;
+    double phi2 = lat2 * M_PI / 180.0, lam2 = lon2 * M_PI / 180.0;
+
+    double cos_d = sin(phi1)*sin(phi2) + cos(phi1)*cos(phi2)*cos(lam2 - lam1);
+    if (cos_d > 1.0) cos_d = 1.0;
+    if (cos_d < -1.0) cos_d = -1.0;
+    double d = acos(cos_d);
+
+    if (d < 1e-10) {
+        double x, y;
+        projection_forward_clamped(lat1, lon1, &x, &y);
+        verts[0] = (float)x;
+        verts[1] = (float)y;
+        return 1;
+    }
+
+    double sin_d = sin(d);
+    int n = GC_LINE_POINTS - 1;
+
+    for (int i = 0; i <= n; i++) {
+        double t = (double)i / (double)n;
+        double a = sin((1.0 - t) * d) / sin_d;
+        double b = sin(t * d) / sin_d;
+
+        double x3 = a * cos(phi1)*cos(lam1) + b * cos(phi2)*cos(lam2);
+        double y3 = a * cos(phi1)*sin(lam1) + b * cos(phi2)*sin(lam2);
+        double z3 = a * sin(phi1)            + b * sin(phi2);
+
+        double lat = atan2(z3, sqrt(x3*x3 + y3*y3)) * 180.0 / M_PI;
+        double lon = atan2(y3, x3) * 180.0 / M_PI;
+
+        double px, py;
+        projection_forward_clamped(lat, lon, &px, &py);
+        verts[i * 2]     = (float)px;
+        verts[i * 2 + 1] = (float)py;
+    }
+
+    return n + 1;
+}
+
 static void print_usage(const char *prog)
 {
     fprintf(stderr,
@@ -130,6 +179,7 @@ int main(int argc, char **argv)
     double center_lat, center_lon, target_lat, target_lon;
     const char *center_name = NULL;
     const char *target_name = NULL;
+    char target_name_buf[64] = {0}; /* mutable buffer for QRZ-updated target name */
     const char *shp_override = NULL;
 
     /* Determine how many positional args we have (before any -flag).
@@ -197,9 +247,10 @@ int main(int argc, char **argv)
         exe_path[len] = '\0';
     }
 
-    char default_shp[PATH_MAX], default_border[PATH_MAX], shader_dir[PATH_MAX];
+    char default_shp[PATH_MAX], default_border[PATH_MAX], default_land[PATH_MAX], shader_dir[PATH_MAX];
     resolve_path(exe_path, DEFAULT_SHP_REL, default_shp, sizeof(default_shp));
     resolve_path(exe_path, DEFAULT_BORDER_REL, default_border, sizeof(default_border));
+    resolve_path(exe_path, DEFAULT_LAND_REL, default_land, sizeof(default_land));
     resolve_path(exe_path, DEFAULT_SHADER_REL, shader_dir, sizeof(shader_dir));
 
     const char *shp_path = shp_override ? shp_override : default_shp;
@@ -226,6 +277,13 @@ int main(int argc, char **argv)
     build_label(center_label, sizeof(center_label), center_name, center_lat, center_lon);
     build_label(target_label, sizeof(target_label), target_name, target_lat, target_lon);
 
+    /* QRZ API init */
+    int has_qrz = 0;
+    if (cfg.qrz_user[0] && cfg.qrz_pass[0]) {
+        if (qrz_init(cfg.qrz_user, cfg.qrz_pass) == 0)
+            has_qrz = 1;
+    }
+
     /* Init GLFW */
     if (!glfwInit()) {
         fprintf(stderr, "Error: GLFW init failed\n");
@@ -236,6 +294,7 @@ int main(int argc, char **argv)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_SAMPLES, 4);
+    glfwWindowHint(GLFW_STENCIL_BITS, 8);
 
     GLFWwindow *window = glfwCreateWindow(DEFAULT_WIDTH, DEFAULT_HEIGHT, "azMap", NULL, NULL);
     if (!window) {
@@ -280,6 +339,14 @@ int main(int argc, char **argv)
     if (!has_borders)
         printf("Note: country borders not found, skipping. Download ne_110m_admin_0_boundary_lines_land.\n");
 
+    /* Load land polygons (optional — no segment splitting for stencil fill) */
+    MapData land;
+    int has_land = (map_data_load(&land, default_land) == 0);
+    if (has_land)
+        map_data_reproject_nosplit(&land);
+    else
+        printf("Note: land polygons not found, skipping. Download ne_110m_land.\n");
+
     /* Build grid (graticule) */
     MapData grid;
     grid.vertices = NULL;
@@ -293,8 +360,14 @@ int main(int argc, char **argv)
     renderer_upload_map(&renderer, &map);
     if (has_borders)
         renderer_upload_borders(&renderer, &borders);
+    if (has_land)
+        renderer_upload_land(&renderer, &land);
     renderer_upload_grid(&renderer, &grid);
-    renderer_upload_target_line(&renderer, 0.0f, 0.0f, (float)tx, (float)ty);
+    {
+        float gc_verts[GC_LINE_POINTS * 2];
+        int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
+        renderer_upload_target_line(&renderer, gc_verts, gc_n);
+    }
     renderer_upload_earth_circle(&renderer, projection_get_radius());
 
     /* North pole marker */
@@ -350,6 +423,8 @@ int main(int argc, char **argv)
 
     /* Night overlay timer (outside loop so center-dirty can reset it) */
     time_t last_sun_update = 0;
+    /* HUD text timer (outside loop so QRZ can force rebuild) */
+    time_t last_text_update = 0;
 
     /* Main loop */
     while (!glfwWindowShouldClose(window)) {
@@ -365,9 +440,17 @@ int main(int argc, char **argv)
                 map_data_reproject(&borders, NULL);
                 renderer_upload_borders(&renderer, &borders);
             }
+            if (has_land) {
+                map_data_reproject_nosplit(&land);
+                renderer_upload_land(&renderer, &land);
+            }
             projection_forward(center_lat, center_lon, &cx, &cy);
             projection_forward(target_lat, target_lon, &tx, &ty);
-            renderer_upload_target_line(&renderer, (float)cx, (float)cy, (float)tx, (float)ty);
+            {
+                float gc_verts[GC_LINE_POINTS * 2];
+                int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
+                renderer_upload_target_line(&renderer, gc_verts, gc_n);
+            }
             projection_forward(90.0, 0.0, &npx, &npy);
             /* In ortho mode, grid depends on projection center */
             if (projection_get_mode() == PROJ_ORTHO) {
@@ -445,7 +528,7 @@ int main(int argc, char **argv)
 
         /* Build and upload popup geometry */
         if (ui.popup.visible) {
-            float popup_quads[3 * 12]; /* 3 quads * 6 verts * 2 floats */
+            float popup_quads[4 * 12]; /* 4 quads * 6 verts * 2 floats */
             float popup_text[4096];
             int pq_count, pt_count;
             ui_build_popup_geometry(&ui, fb_w, fb_h,
@@ -474,10 +557,18 @@ int main(int argc, char **argv)
                     map_data_reproject(&borders, NULL);
                     renderer_upload_borders(&renderer, &borders);
                 }
+                if (has_land) {
+                    map_data_reproject_nosplit(&land);
+                    renderer_upload_land(&renderer, &land);
+                }
                 /* Re-project key points */
                 projection_forward(center_lat, center_lon, &cx, &cy);
                 projection_forward(target_lat, target_lon, &tx, &ty);
-                renderer_upload_target_line(&renderer, (float)cx, (float)cy, (float)tx, (float)ty);
+                {
+                    float gc_verts[GC_LINE_POINTS * 2];
+                    int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
+                    renderer_upload_target_line(&renderer, gc_verts, gc_n);
+                }
                 projection_forward(90.0, 0.0, &npx, &npy);
                 /* Rebuild grid for new mode */
                 if (nxt == PROJ_ORTHO)
@@ -510,7 +601,13 @@ int main(int argc, char **argv)
                 ui.buttons[btn_spore].visible = 1;
                 ui.buttons[btn_muf].visible = 1;
             } else if (ui.clicked == btn_opt1) {
-                ui_show_popup(&ui, "QRZ");
+                ui_show_popup(&ui, "QRZ LOOKUP");
+                if (!has_qrz) {
+                    strncpy(ui.popup_result[0], "NO QRZ CREDENTIALS", sizeof(ui.popup_result[0]) - 1);
+                    strncpy(ui.popup_result[1], "IN CONFIG", sizeof(ui.popup_result[1]) - 1);
+                    ui.popup_result_lines = 2;
+                    ui.popup_input_active = 0;
+                }
             } else if (ui.clicked == btn_opt2) {
                 ui_show_popup(&ui, "WSJT");
             } else if (ui.clicked == btn_opt3) {
@@ -531,9 +628,88 @@ int main(int argc, char **argv)
             ui.clicked = -1;
         }
 
+        /* Handle QRZ popup submission */
+        if (ui.popup_submitted) {
+            ui.popup_submitted = 0;
+            QRZResult qrz_result;
+            char err_buf[128];
+            if (qrz_lookup(ui.popup_input, &qrz_result, err_buf, sizeof(err_buf)) == 0
+                && qrz_result.valid) {
+                /* Update target */
+                target_lat = qrz_result.lat;
+                target_lon = qrz_result.lon;
+                strncpy(target_name_buf, qrz_result.call, sizeof(target_name_buf) - 1);
+                target_name = target_name_buf;
+                build_label(target_label, sizeof(target_label),
+                            target_name, target_lat, target_lon);
+                /* Recompute distance/azimuth from current projection center */
+                dist = projection_distance(input.center_lat, input.center_lon,
+                                           target_lat, target_lon);
+                az_to = projection_azimuth(input.center_lat, input.center_lon,
+                                           target_lat, target_lon);
+                az_from = projection_azimuth(target_lat, target_lon,
+                                             input.center_lat, input.center_lon);
+                /* Re-project target */
+                projection_forward(target_lat, target_lon, &tx, &ty);
+                projection_forward(center_lat, center_lon, &cx, &cy);
+                {
+                    float gc_verts[GC_LINE_POINTS * 2];
+                    int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
+                    renderer_upload_target_line(&renderer, gc_verts, gc_n);
+                }
+                /* Force HUD rebuild */
+                last_text_update = 0;
+
+                /* Fill popup result lines */
+                strncpy(ui.popup_result[0], qrz_result.call,
+                        sizeof(ui.popup_result[0]) - 1);
+                /* Uppercase name for stroke font */
+                {
+                    char upper_name[128];
+                    int ni = 0;
+                    for (int ci = 0; qrz_result.name[ci] && ni < 127; ci++)
+                        upper_name[ni++] = (char)toupper((unsigned char)qrz_result.name[ci]);
+                    upper_name[ni] = '\0';
+                    strncpy(ui.popup_result[1], upper_name,
+                            sizeof(ui.popup_result[1]) - 1);
+                }
+                {
+                    char upper_loc[128];
+                    int li = 0;
+                    for (int ci = 0; qrz_result.location[ci] && li < 127; ci++)
+                        upper_loc[li++] = (char)toupper((unsigned char)qrz_result.location[ci]);
+                    upper_loc[li] = '\0';
+                    strncpy(ui.popup_result[2], upper_loc,
+                            sizeof(ui.popup_result[2]) - 1);
+                }
+                {
+                    char coord[64];
+                    format_coord(coord, sizeof(coord), qrz_result.lat, qrz_result.lon);
+                    char upper_grid[16];
+                    int gi = 0;
+                    for (int ci = 0; qrz_result.grid[ci] && gi < 15; ci++)
+                        upper_grid[gi++] = (char)toupper((unsigned char)qrz_result.grid[ci]);
+                    upper_grid[gi] = '\0';
+                    snprintf(ui.popup_result[3], sizeof(ui.popup_result[3]),
+                             "GRID: %.10s  %.24s", upper_grid, coord);
+                }
+                ui.popup_result_lines = 4;
+                ui.popup_input_active = 0;
+            } else {
+                /* Error */
+                char upper_err[64];
+                int ei = 0;
+                for (int ci = 0; err_buf[ci] && ei < 63; ci++)
+                    upper_err[ei++] = (char)toupper((unsigned char)err_buf[ci]);
+                upper_err[ei] = '\0';
+                strncpy(ui.popup_result[0], upper_err,
+                        sizeof(ui.popup_result[0]) - 1);
+                ui.popup_result_lines = 1;
+            }
+        }
+
         /* Rebuild HUD text every second (includes live clock) */
         {
-            static time_t last_text_update = 0;
             time_t now = time(NULL);
             if (now != last_text_update) {
                 last_text_update = now;
@@ -576,9 +752,11 @@ int main(int argc, char **argv)
     }
 
     /* Cleanup */
+    if (has_qrz) qrz_cleanup();
     renderer_destroy(&renderer);
     map_data_free(&map);
     if (has_borders) map_data_free(&borders);
+    if (has_land) map_data_free(&land);
     free(grid.vertices);
     nightmesh_free(&nightmesh);
     glfwDestroyWindow(window);

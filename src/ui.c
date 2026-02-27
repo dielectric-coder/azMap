@@ -10,11 +10,22 @@ void ui_init(UI *ui)
     ui->popup_close_hovered = 0;
 }
 
+void ui_popup_clear_input(UI *ui)
+{
+    memset(ui->popup_input, 0, sizeof(ui->popup_input));
+    ui->popup_input_len = 0;
+    memset(ui->popup_result, 0, sizeof(ui->popup_result));
+    ui->popup_result_lines = 0;
+    ui->popup_submitted = 0;
+}
+
 void ui_show_popup(UI *ui, const char *title)
 {
     strncpy(ui->popup.title, title, sizeof(ui->popup.title) - 1);
     ui->popup.title[sizeof(ui->popup.title) - 1] = '\0';
     ui->popup.visible = 1;
+    ui_popup_clear_input(ui);
+    ui->popup_input_active = 1;
 }
 
 void ui_hide_popup(UI *ui)
@@ -140,6 +151,14 @@ void ui_build_popup_geometry(UI *ui, int fb_w, int fb_h,
     ui->popup_close_h = close_sz;
     emit_quad(quad_verts, quad_count, cx, cy, cx + close_sz, cy + close_sz);
 
+    /* Quad 3: input box background */
+    float input_x = px + 90.0f;
+    float input_y = py + 45.0f;
+    float input_w = 280.0f;
+    float input_h = 25.0f;
+    emit_quad(quad_verts, quad_count, input_x, input_y,
+              input_x + input_w, input_y + input_h);
+
     /* Title text (centered in title bar) */
     float tsz = title_h * 0.55f;
     float ttw = text_width(ui->popup.title, tsz);
@@ -155,4 +174,29 @@ void ui_build_popup_geometry(UI *ui, int fb_w, int fb_h,
     float xy = cy + (close_sz - xsz) * 0.5f;
     *text_count += text_build("X", xx, xy, xsz,
                               text_verts + *text_count * 2, 4096 - *text_count);
+
+    /* "CALL:" label */
+    float lsz = 16.0f;
+    *text_count += text_build("CALL:", px + 20.0f, py + 50.0f, lsz,
+                              text_verts + *text_count * 2, 4096 - *text_count);
+
+    /* Typed text inside input box */
+    if (ui->popup_input_len > 0) {
+        *text_count += text_build(ui->popup_input, input_x + 5.0f, input_y + 4.0f, lsz,
+                                  text_verts + *text_count * 2, 4096 - *text_count);
+    }
+
+    /* Cursor after last character */
+    if (ui->popup_input_active) {
+        float cur_x = input_x + 5.0f + text_width(ui->popup_input, lsz);
+        *text_count += text_build("_", cur_x, input_y + 4.0f, lsz,
+                                  text_verts + *text_count * 2, 4096 - *text_count);
+    }
+
+    /* Result lines */
+    for (int i = 0; i < ui->popup_result_lines && i < 4; i++) {
+        float ry = py + 90.0f + (float)i * 25.0f;
+        *text_count += text_build(ui->popup_result[i], px + 20.0f, ry, lsz,
+                                  text_verts + *text_count * 2, 4096 - *text_count);
+    }
 }

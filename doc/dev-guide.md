@@ -46,20 +46,35 @@ Drawn back to front in `renderer_draw()`:
 
 | Order | Layer | Color | Draw Mode |
 |-------|-------|-------|-----------|
-| 1 | Earth filled disc | Dark blue-gray (0.12, 0.12, 0.25) | GL_TRIANGLE_FAN |
-| 2 | Earth boundary circle | Dark blue (0.15, 0.15, 0.3) | GL_LINE_LOOP |
-| 3 | Grid (rings+radials or parallels+meridians) | Dim (0.2, 0.2, 0.3) | GL_LINE_STRIP |
-| 4 | Night overlay | Dark (0.0, 0.0, 0.05) × per-vertex alpha | GL_TRIANGLES |
-| 5 | Country borders | Gray (0.4, 0.4, 0.5) | GL_LINE_STRIP |
-| 6 | Coastlines | Green (0.2, 0.8, 0.3) | GL_LINE_STRIP |
-| 7 | Target line | Yellow (1.0, 0.9, 0.2) | GL_LINES |
-| 8 | Center marker | White (1.0, 1.0, 1.0) | GL_TRIANGLE_FAN |
-| 9 | Target marker | Red (1.0, 0.3, 0.2) | GL_LINE_LOOP |
-| 10 | North pole triangle | White (1.0, 1.0, 1.0) | GL_TRIANGLES |
-| 11 | Location labels | Cyan / Orange | GL_LINES (pixel-space) |
-| 12 | HUD text (dist/az) | White (1.0, 1.0, 1.0) | GL_LINES (pixel-space) |
+| 1 | Earth filled disc (ocean) | Dark blue-gray (0.12, 0.12, 0.25) | GL_TRIANGLE_FAN |
+| 2 | Land fill (stencil) | Dark green-gray (0.12, 0.15, 0.10) | GL_TRIANGLE_FAN (stencil) |
+| 3 | Earth boundary circle | Dark blue (0.15, 0.15, 0.3) | GL_LINE_LOOP |
+| 4 | Grid (rings+radials or parallels+meridians) | Dim (0.2, 0.2, 0.3) | GL_LINE_STRIP |
+| 5 | Night overlay | Dark (0.0, 0.0, 0.05) × per-vertex alpha | GL_TRIANGLES |
+| 6 | Country borders | Gray (0.4, 0.4, 0.5) | GL_LINE_STRIP |
+| 7 | Coastlines | Green (0.2, 0.8, 0.3) | GL_LINE_STRIP |
+| 8 | Target line (great circle) | Yellow (1.0, 0.9, 0.2) | GL_LINE_STRIP |
+| 9 | Center marker | White (1.0, 1.0, 1.0) | GL_TRIANGLE_FAN |
+| 10 | Target marker | Red (1.0, 0.3, 0.2) | GL_LINE_LOOP |
+| 11 | North pole triangle | White (1.0, 1.0, 1.0) | GL_TRIANGLES |
+| 12 | Location labels | Cyan / Orange | GL_LINES (pixel-space) |
+| 13 | HUD text (dist/az) | White (1.0, 1.0, 1.0) | GL_LINES (pixel-space) |
 
-Layers 11-12 use a pixel-space orthographic matrix (y-down) instead of the map MVP.
+Layers 12-13 use a pixel-space orthographic matrix (y-down) instead of the map MVP.
+
+### Land Fill (Stencil Buffer)
+
+Land polygons from `ne_110m_land` are rendered as filled areas using the stencil buffer inversion technique:
+
+1. **Mark disc**: Draw earth disc into stencil bit 7 (0x80) — restricts subsequent writes to the visible hemisphere
+2. **Invert land rings**: Draw each polygon ring as `GL_TRIANGLE_FAN` with `GL_INVERT` on lower stencil bits, only where bit 7 is set
+3. **Color pass**: Draw disc with land color where `stencil > 0x80` (disc bit + odd inversions)
+
+This handles concave polygons and holes (e.g. Caspian Sea) via the odd-even fill rule without triangulation. Land polygons use `map_data_reproject_nosplit()` to preserve ring topology (no segment splitting), and `projection_forward_clamped()` to clamp back-hemisphere vertices to the boundary circle instead of 1e6.
+
+### Great Circle Target Line
+
+The center-to-target line is rendered as a 101-point `GL_LINE_STRIP` computed via spherical linear interpolation (slerp). Intermediate lat/lon points are projected through `projection_forward_clamped()`. In azeq mode centered on the origin, the points are naturally collinear (straight line). In orthographic mode, the line appears as a curved great circle arc.
 
 ### Day/Night Overlay
 
@@ -134,14 +149,15 @@ API:
 - `projection_set_mode(mode)` / `projection_get_mode()` — switch between modes
 - `projection_get_radius()` — returns `EARTH_MAX_PROJ_RADIUS` for azeq, `EARTH_RADIUS_KM` for ortho
 - `projection_set_center(lat, lon)` — sets the projection center (stored as module-level state)
-- `projection_forward(lat, lon, &x, &y)` — lat/lon degrees to km-space (returns -1 if clipped in ortho)
+- `projection_forward(lat, lon, &x, &y)` — lat/lon degrees to km-space (returns -1 if clipped in ortho, coords set to 1e6)
+- `projection_forward_clamped(lat, lon, &x, &y)` — like `projection_forward` but clamps ortho back-hemisphere points to the boundary circle instead of 1e6 (always returns 0). Used by land polygon fill and great circle target line.
 - `projection_inverse(x, y, &lat, &lon)` — km-space back to lat/lon (uses `asin(rho/R)` for ortho, `rho/R` for azeq)
 - `projection_distance(lat1, lon1, lat2, lon2)` — great-circle distance in km
 - `projection_azimuth(lat1, lon1, lat2, lon2)` — azimuth in degrees (0=N, clockwise)
 
 ### Antipodal / Back-Hemisphere Handling
 
-In azimuthal equidistant mode, points near the antipode produce large jumps in km-space. In orthographic mode, back-hemisphere points are set to 1e6 km. In both cases, `map_data.c` splits polyline segments where consecutive projected points are more than 5000 km apart, preventing visual artifacts.
+In azimuthal equidistant mode, points near the antipode produce large jumps in km-space. In orthographic mode, back-hemisphere points are set to 1e6 km. In both cases, `map_data.c` splits polyline segments where consecutive projected points are more than 5000 km apart, preventing visual artifacts. Land polygons use a separate path: `map_data_reproject_nosplit()` preserves original ring topology (needed for stencil fill) and uses `projection_forward_clamped()` which clamps back-hemisphere points to the boundary circle.
 
 ## Building
 

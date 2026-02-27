@@ -24,6 +24,10 @@ void projection_get_center(double *lat_deg, double *lon_deg);
  * Returns 0 on success, -1 if the point is antipodal (undefined). */
 int projection_forward(double lat_deg, double lon_deg, double *x, double *y);
 
+/* Like projection_forward but clamps ortho back-hemisphere points to the
+ * boundary circle instead of returning (1e6,1e6). Always returns 0. */
+int projection_forward_clamped(double lat_deg, double lon_deg, double *x, double *y);
+
 /* Inverse projection: x,y (km) → lat/lon (degrees).
  * Returns 0 on success, -1 if the point is outside the globe. */
 int projection_inverse(double x, double y, double *lat_deg, double *lon_deg);

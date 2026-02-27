@@ -24,6 +24,14 @@ typedef struct {
     UIPopup  popup;
     float    popup_close_x, popup_close_y, popup_close_w, popup_close_h;
     int      popup_close_hovered;
+
+    /* Popup text input */
+    char     popup_input[32];
+    int      popup_input_len;
+    int      popup_input_active;
+    char     popup_result[4][64];
+    int      popup_result_lines;
+    int      popup_submitted;        /* 1 when Enter pressed, cleared by main */
 } UI;
 
 /* Zero out state. */
@@ -46,6 +54,9 @@ void ui_build_geometry(const UI *ui,
                        float *quad_verts, int *quad_count,
                        float *text_verts, int *text_count,
                        int *hovered_quad);
+
+/* Clear popup input buffer and results. */
+void ui_popup_clear_input(UI *ui);
 
 /* Show a centered popup panel with the given title. */
 void ui_show_popup(UI *ui, const char *title);
