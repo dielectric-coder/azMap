@@ -19,7 +19,9 @@ typedef struct {
 static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *userdata)
 {
     Buffer *buf = (Buffer *)userdata;
+    if (size != 0 && nmemb > (size_t)-1 / size) return 0;
     size_t total = size * nmemb;
+    if (total > (size_t)-1 - buf->size - 1) return 0;
     if (buf->size + total + 1 > buf->cap) {
         size_t newcap = (buf->cap + total + 1) * 2;
         char *tmp = realloc(buf->data, newcap);
@@ -88,10 +90,20 @@ static int http_get(const char *url, Buffer *buf)
 
 static int qrz_login(char *err_buf, int err_sz)
 {
+    CURL *enc = curl_easy_init();
+    if (!enc) {
+        if (err_buf) snprintf(err_buf, err_sz, "CURL INIT FAILED");
+        return -1;
+    }
+    char *esc_user = curl_easy_escape(enc, qrz_user, 0);
+    char *esc_pass = curl_easy_escape(enc, qrz_pass, 0);
     char url[512];
     snprintf(url, sizeof(url),
              "https://xmldata.qrz.com/xml/current/?username=%s;password=%s;agent=azmap1.0",
-             qrz_user, qrz_pass);
+             esc_user ? esc_user : "", esc_pass ? esc_pass : "");
+    curl_free(esc_user);
+    curl_free(esc_pass);
+    curl_easy_cleanup(enc);
 
     Buffer buf;
     if (http_get(url, &buf) != 0) {
@@ -149,10 +161,18 @@ int qrz_lookup(const char *callsign, QRZResult *result, char *err_buf, int err_s
         call_upper[ci++] = (char)toupper((unsigned char)callsign[i]);
     call_upper[ci] = '\0';
 
+    CURL *enc = curl_easy_init();
+    if (!enc) {
+        if (err_buf) snprintf(err_buf, err_sz, "CURL INIT FAILED");
+        return -1;
+    }
+    char *esc_call = curl_easy_escape(enc, call_upper, 0);
     char url[512];
     snprintf(url, sizeof(url),
              "https://xmldata.qrz.com/xml/current/?s=%s;callsign=%s",
-             session_key, call_upper);
+             session_key, esc_call ? esc_call : "");
+    curl_free(esc_call);
+    curl_easy_cleanup(enc);
 
     Buffer buf;
     if (http_get(url, &buf) != 0) {

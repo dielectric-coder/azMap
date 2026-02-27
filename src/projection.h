@@ -1,8 +1,9 @@
 #ifndef PROJECTION_H
 #define PROJECTION_H
 
+#include <math.h>
+
 #define EARTH_RADIUS_KM 6371.0
-#define EARTH_CIRCUMFERENCE_KM (2.0 * M_PI * EARTH_RADIUS_KM)
 #define EARTH_MAX_PROJ_RADIUS (M_PI * EARTH_RADIUS_KM)  /* ~20015 km */
 
 typedef enum { PROJ_AZEQ, PROJ_ORTHO } ProjMode;

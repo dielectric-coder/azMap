@@ -20,6 +20,7 @@ src/
   input.h/c         GLFW callbacks: scroll, drag, popup drag, keyboard
   ui.h/c            UI system: buttons, draggable popup panel, text input
   text.h/c          Vector stroke font for on-screen text
+  qrz.h/c           QRZ.com callsign lookup via XML API (libcurl)
 shaders/
   map.vert          Vertex shader (MVP * position, per-vertex alpha passthrough)
   map.frag          Fragment shader (uniform color * vertex alpha)
@@ -178,11 +179,12 @@ make
 | GLFW 3 | Window, input, GL context | `glfw` |
 | GLEW | OpenGL extension loading | `glew` |
 | shapelib | Shapefile parsing | `shapelib` |
+| libcurl | HTTP requests (QRZ lookup) | `curl` |
 | OpenGL 3.3+ | Rendering | (driver) |
 
 ### Build Output
 
 - `build/azmap` - the executable
-- `build/shaders/` - copied from `shaders/` by CMake at configure time
+- `build/shaders/` - copied from `shaders/` on every build
 
 The executable resolves data paths relative to its own location (`../data/`, `../shaders/`), so it works both from the build directory and when installed.

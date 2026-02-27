@@ -126,7 +126,10 @@ void ui_build_popup_geometry(UI *ui, int fb_w, int fb_h,
     *quad_count = 0;
     *text_count = 0;
 
-    float pw = 400.0f, ph = 80.0f;
+    float pw = 400.0f, base_ph = 80.0f;
+    /* Expand popup height to include result lines */
+    int rlines = (ui->popup_result_lines < 4) ? ui->popup_result_lines : 4;
+    float ph = base_ph + (rlines > 0 ? 10.0f + rlines * 25.0f : 0.0f);
     float px = ((float)fb_w - pw) * 0.5f + ui->popup.offset_x;
     float py = ((float)fb_h - ph) * 0.5f + ui->popup.offset_y;
     float title_h = 30.0f;
@@ -195,9 +198,9 @@ void ui_build_popup_geometry(UI *ui, int fb_w, int fb_h,
                                   text_verts + *text_count * 2, 4096 - *text_count);
     }
 
-    /* Result lines */
+    /* Result lines (inside expanded popup area) */
     for (int i = 0; i < ui->popup_result_lines && i < 4; i++) {
-        float ry = py + ph + 10.0f + (float)i * 25.0f;
+        float ry = py + base_ph + 10.0f + (float)i * 25.0f;
         *text_count += text_build(ui->popup_result[i], px + 20.0f, ry, lsz,
                                   text_verts + *text_count * 2, 4096 - *text_count);
     }

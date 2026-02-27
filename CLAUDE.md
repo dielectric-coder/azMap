@@ -8,11 +8,11 @@ azMap is a C application that renders an interactive map projection using OpenGL
 
 ## Build
 
-Dependencies: GLFW3, GLEW, shapelib, OpenGL 3.3+
+Dependencies: GLFW3, GLEW, shapelib, libcurl, OpenGL 3.3+
 
 ```bash
 # Install dependencies (Arch/Manjaro)
-sudo pacman -S glfw shapelib glew
+sudo pacman -S glfw shapelib glew curl
 
 # Build
 mkdir -p build && cd build && cmake .. && make
@@ -86,7 +86,8 @@ src/
 ├── camera.h/c      Orthographic view state (zoom_km, pan offset), MVP matrix
 ├── input.h/c       GLFW callbacks: scroll→zoom, drag→pan, popup drag, keyboard shortcuts
 ├── ui.h/c          UI system: buttons, draggable popup panel, text input
-└── text.h/c        Vector stroke font for on-screen text (distance/azimuth overlay)
+├── text.h/c        Vector stroke font for on-screen text (distance/azimuth overlay)
+└── qrz.h/c        QRZ.com callsign lookup via XML API (libcurl)
 shaders/
 ├── map.vert        Vertex shader (MVP transform + per-vertex alpha passthrough)
 └── map.frag        Fragment shader (uniform color * vertex alpha)

@@ -1,4 +1,5 @@
 #include <math.h>
+#include <time.h>
 #include "solar.h"
 
 #define DEG2RAD (M_PI / 180.0)
@@ -6,7 +7,12 @@
 
 SubsolarPoint solar_subsolar_point(time_t utc_time)
 {
-    struct tm *gm = gmtime(&utc_time);
+    struct tm gm_buf;
+    struct tm *gm = gmtime_r(&utc_time, &gm_buf);
+    if (!gm) {
+        SubsolarPoint sp = { 0.0, 0.0 };
+        return sp;
+    }
 
     /* Day of year (0-based) + fractional day */
     int doy = gm->tm_yday;

@@ -7,18 +7,19 @@
 - **GLFW 3** - windowing and input
 - **GLEW** - OpenGL extension loading
 - **shapelib** - shapefile parsing
+- **libcurl** - HTTP requests (QRZ callsign lookup)
 - **OpenGL 3.3+** - rendering
 
 #### Arch / Manjaro
 
 ```bash
-sudo pacman -S glfw shapelib glew
+sudo pacman -S glfw shapelib glew curl
 ```
 
 #### Ubuntu / Debian
 
 ```bash
-sudo apt install libglfw3-dev libglew-dev libshp-dev
+sudo apt install libglfw3-dev libglew-dev libshp-dev libcurl4-openssl-dev
 ```
 
 ### Building

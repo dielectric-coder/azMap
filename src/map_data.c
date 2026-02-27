@@ -85,6 +85,7 @@ static void project_all(MapData *md)
 {
     /* First pass: project all raw vertices */
     float *proj = malloc(md->raw_count * 2 * sizeof(float));
+    if (!proj) return;
     for (int i = 0; i < md->raw_count; i++) {
         double x, y;
         projection_forward(md->raw_lats[i], md->raw_lons[i], &x, &y);
@@ -177,6 +178,7 @@ static void project_nosplit(MapData *md)
 
     /* Check each raw vertex for back-hemisphere */
     int *back = malloc(md->raw_count * sizeof(int));
+    if (!back) { md->vertices = NULL; md->vertex_count = 0; md->num_segments = 0; return; }
     for (int i = 0; i < md->raw_count; i++) {
         double x, y;
         back[i] = (projection_forward(md->raw_lats[i], md->raw_lons[i], &x, &y) != 0);
@@ -186,6 +188,11 @@ static void project_nosplit(MapData *md)
     int max_out = md->raw_count * 2;
     double *clip_lats = malloc(max_out * sizeof(double));
     double *clip_lons = malloc(max_out * sizeof(double));
+    if (!clip_lats || !clip_lons) {
+        free(clip_lats); free(clip_lons); free(back);
+        md->vertices = NULL; md->vertex_count = 0; md->num_segments = 0;
+        return;
+    }
     int clip_count = 0;
 
     md->num_segments = md->raw_num_segments;
@@ -258,6 +265,11 @@ static void project_nosplit(MapData *md)
 
     /* Project clipped vertices */
     md->vertices = malloc(clip_count * 2 * sizeof(float));
+    if (!md->vertices) {
+        free(clip_lats); free(clip_lons); free(back);
+        md->vertex_count = 0; md->num_segments = 0;
+        return;
+    }
     for (int i = 0; i < clip_count; i++) {
         double x, y;
         projection_forward_clamped(clip_lats[i], clip_lons[i], &x, &y);
@@ -277,9 +289,8 @@ void map_data_reproject_nosplit(MapData *md)
         project_nosplit(md);
 }
 
-void map_data_reproject(MapData *md, const char *shp_path)
+void map_data_reproject(MapData *md)
 {
-    (void)shp_path;
     if (md->raw_count > 0) {
         project_all(md);
     }

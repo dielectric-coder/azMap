@@ -56,16 +56,21 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     float step_km = g_input->cam->zoom_km * 0.05f;
     float km_per_deg = (float)(EARTH_RADIUS_KM * M_PI / 180.0);
     double dlat, dlon;
+    /* Clamp latitude before cos() to avoid division by zero at poles */
+    double clamp_lat = g_input->center_lat;
+    if (clamp_lat > 89.9) clamp_lat = 89.9;
+    if (clamp_lat < -89.9) clamp_lat = -89.9;
+    double cos_lat = cos(clamp_lat * M_PI / 180.0);
 
     switch (key) {
     case GLFW_KEY_LEFT:
-        dlon = (double)(-step_km / (km_per_deg * cos(g_input->center_lat * M_PI / 180.0)));
+        dlon = (double)(-step_km / (km_per_deg * cos_lat));
         g_input->center_lon += dlon;
         if (g_input->center_lon < -180.0) g_input->center_lon += 360.0;
         g_input->center_dirty = 1;
         break;
     case GLFW_KEY_RIGHT:
-        dlon = (double)(step_km / (km_per_deg * cos(g_input->center_lat * M_PI / 180.0)));
+        dlon = (double)(step_km / (km_per_deg * cos_lat));
         g_input->center_lon += dlon;
         if (g_input->center_lon > 180.0) g_input->center_lon -= 360.0;
         g_input->center_dirty = 1;
@@ -216,8 +221,12 @@ static void cursor_pos_callback(GLFWwindow *window, double xpos, double ypos)
     float km_per_pixel = g_input->cam->zoom_km / (float)g_input->win_height;
     float km_per_deg = (float)(EARTH_RADIUS_KM * M_PI / 180.0);
     double dlat = (double)((float)dy * km_per_pixel / km_per_deg);
+    /* Clamp latitude before cos() to avoid division by zero at poles */
+    double clamp_lat = g_input->center_lat;
+    if (clamp_lat > 89.9) clamp_lat = 89.9;
+    if (clamp_lat < -89.9) clamp_lat = -89.9;
     double dlon = (double)((float)(-dx) * km_per_pixel /
-                  (km_per_deg * cos(g_input->center_lat * M_PI / 180.0)));
+                  (km_per_deg * cos(clamp_lat * M_PI / 180.0)));
     g_input->center_lat += dlat;
     g_input->center_lon += dlon;
     if (g_input->center_lat > 90.0) g_input->center_lat = 90.0;

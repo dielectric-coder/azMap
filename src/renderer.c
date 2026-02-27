@@ -15,10 +15,12 @@ static char *read_file(const char *path)
     }
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
+    if (len < 0) { fclose(f); return NULL; }
     fseek(f, 0, SEEK_SET);
-    char *buf = malloc(len + 1);
-    fread(buf, 1, len, f);
-    buf[len] = '\0';
+    char *buf = malloc((size_t)len + 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t nread = fread(buf, 1, (size_t)len, f);
+    buf[nread] = '\0';
     fclose(f);
     return buf;
 }
@@ -34,6 +36,8 @@ static unsigned int compile_shader(const char *src, GLenum type)
         char log[512];
         glGetShaderInfoLog(s, sizeof(log), NULL, log);
         fprintf(stderr, "Shader compile error: %s\n", log);
+        glDeleteShader(s);
+        return 0;
     }
     return s;
 }
@@ -245,6 +249,7 @@ void renderer_upload_earth_circle(Renderer *r, double radius)
 {
     int n = 360;
     float *verts = malloc(n * 2 * sizeof(float));
+    if (!verts) return;
     for (int i = 0; i < n; i++) {
         double a = 2.0 * M_PI * i / n;
         verts[i * 2]     = (float)(radius * cos(a));
@@ -265,6 +270,7 @@ void renderer_upload_earth_circle(Renderer *r, double radius)
     /* Filled disc (TRIANGLE_FAN: center + ring) */
     int dn = n + 2;  /* center + n ring points + closing point */
     float *dverts = malloc(dn * 2 * sizeof(float));
+    if (!dverts) { free(verts); return; }
     dverts[0] = 0.0f;
     dverts[1] = 0.0f;
     for (int i = 0; i <= n; i++) {

@@ -23,7 +23,7 @@ typedef struct {
 int map_data_load(MapData *md, const char *shp_path);
 
 /* Re-project all vertices (call after changing projection center). */
-void map_data_reproject(MapData *md, const char *shp_path);
+void map_data_reproject(MapData *md);
 
 /* Re-project without splitting segments (preserves ring topology for polygon fill). */
 void map_data_reproject_nosplit(MapData *md);

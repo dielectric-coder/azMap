@@ -305,10 +305,15 @@ int main(int argc, char **argv)
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
-    /* Init GLEW — ignore GLEW_ERROR_NO_GLX_DISPLAY on Wayland */
+    /* Init GLEW — ignore GLEW_ERROR_NO_GLX_DISPLAY on Wayland.
+     * GLEW 2.1+ defines GLEW_ERROR_NO_GLX_DISPLAY = 4; use literal
+     * for compatibility with older GLEW versions. */
     glewExperimental = GL_TRUE;
     GLenum glew_err = glewInit();
-    if (glew_err != GLEW_OK && glew_err != 4 /* GLEW_ERROR_NO_GLX_DISPLAY */) {
+    #ifndef GLEW_ERROR_NO_GLX_DISPLAY
+    #define GLEW_ERROR_NO_GLX_DISPLAY 4
+    #endif
+    if (glew_err != GLEW_OK && glew_err != GLEW_ERROR_NO_GLX_DISPLAY) {
         fprintf(stderr, "Error: GLEW init failed: %s\n", glewGetErrorString(glew_err));
         glfwTerminate();
         return 1;
@@ -349,7 +354,7 @@ int main(int argc, char **argv)
 
     /* Build grid (graticule) */
     MapData grid;
-    grid.vertices = NULL;
+    memset(&grid, 0, sizeof(grid));
     grid_build(&grid);
 
     /* Night overlay */
@@ -434,10 +439,10 @@ int main(int argc, char **argv)
         if (input.center_dirty) {
             input.center_dirty = 0;
             projection_set_center(input.center_lat, input.center_lon);
-            map_data_reproject(&map, NULL);
+            map_data_reproject(&map);
             renderer_upload_map(&renderer, &map);
             if (has_borders) {
-                map_data_reproject(&borders, NULL);
+                map_data_reproject(&borders);
                 renderer_upload_borders(&renderer, &borders);
             }
             if (has_land) {
@@ -498,18 +503,26 @@ int main(int argc, char **argv)
         int tbg = build_label_bg(tlx, tly, tw, label_size, pad, bg_verts + cbg * 2);
         renderer_upload_label_bgs(&renderer, bg_verts, cbg + tbg, cbg);
 
-        /* Update button positions (horizontal, centered at bottom) */
+        /* Update button positions (horizontal, centered at bottom — visible only) */
         {
-            float bw = 90.0f, bh = 30.0f, gap = 10.0f, margin = 10.0f;
-            int n = ui.count;
-            float total_w = n * bw + (n - 1) * gap;
-            float start_x = ((float)fb_w - total_w) * 0.5f;
+            float bh = 30.0f, gap = 10.0f, margin = 10.0f;
             float by = (float)fb_h - bh - margin;
-            for (int bi = 0; bi < n; bi++) {
-                ui.buttons[bi].x = start_x + bi * (bw + gap);
+            /* Compute total width of visible buttons */
+            float total_w = 0.0f;
+            int nvis = 0;
+            for (int bi = 0; bi < ui.count; bi++) {
+                if (!ui.buttons[bi].visible) continue;
+                total_w += ui.buttons[bi].w;
+                nvis++;
+            }
+            if (nvis > 1) total_w += (nvis - 1) * gap;
+            float bx = ((float)fb_w - total_w) * 0.5f;
+            for (int bi = 0; bi < ui.count; bi++) {
+                if (!ui.buttons[bi].visible) continue;
+                ui.buttons[bi].x = bx;
                 ui.buttons[bi].y = by;
-                ui.buttons[bi].w = bw;
                 ui.buttons[bi].h = bh;
+                bx += ui.buttons[bi].w + gap;
             }
         }
 
@@ -528,7 +541,7 @@ int main(int argc, char **argv)
 
         /* Build and upload popup geometry */
         if (ui.popup.visible) {
-            float popup_quads[4 * 12]; /* 4 quads * 6 verts * 2 floats */
+            float popup_quads[5 * 12]; /* up to 5 quads * 6 verts * 2 floats */
             float popup_text[4096];
             int pq_count, pt_count;
             ui_build_popup_geometry(&ui, fb_w, fb_h,
@@ -551,10 +564,10 @@ int main(int argc, char **argv)
                 ProjMode nxt = (cur == PROJ_AZEQ) ? PROJ_ORTHO : PROJ_AZEQ;
                 projection_set_mode(nxt);
                 /* Reproject all map geometry */
-                map_data_reproject(&map, NULL);
+                map_data_reproject(&map);
                 renderer_upload_map(&renderer, &map);
                 if (has_borders) {
-                    map_data_reproject(&borders, NULL);
+                    map_data_reproject(&borders);
                     renderer_upload_borders(&renderer, &borders);
                 }
                 if (has_land) {

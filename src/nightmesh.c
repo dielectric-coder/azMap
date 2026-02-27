@@ -26,6 +26,7 @@ void nightmesh_init(NightMesh *nm)
      * Outer rings: ANGULAR_DIVS * (RADIAL_DIVS-1) quads * 2 tris * 3 verts */
     int max_verts = ANGULAR_DIVS * 3 + ANGULAR_DIVS * (RADIAL_DIVS - 1) * 6;
     nm->vertices = malloc(max_verts * 3 * sizeof(float));
+    if (!nm->vertices) { nm->capacity = 0; nm->vertex_count = 0; return; }
     nm->capacity = max_verts;
     nm->vertex_count = 0;
 }
@@ -53,6 +54,7 @@ void nightmesh_build(NightMesh *nm, const SubsolarPoint *sun)
     int rows = RADIAL_DIVS + 1;  /* 0 to RADIAL_DIVS inclusive */
     int cols = ANGULAR_DIVS;
     float *alpha_grid = malloc(rows * cols * sizeof(float));
+    if (!alpha_grid) return;
 
     for (int ri = 0; ri <= RADIAL_DIVS; ri++) {
         float r = ri * dr;

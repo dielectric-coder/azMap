@@ -59,5 +59,12 @@ target_compile_options(azmap PRIVATE
     -Wall -Wextra
 )
 
-# Copy shaders to build directory
-file(COPY shaders DESTINATION ${CMAKE_BINARY_DIR})
+# Copy shaders to build directory on every build
+file(GLOB SHADER_FILES ${CMAKE_SOURCE_DIR}/shaders/*)
+add_custom_target(copy_shaders ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/shaders ${CMAKE_BINARY_DIR}/shaders
+    DEPENDS ${SHADER_FILES}
+    COMMENT "Copying shaders to build directory"
+)
+add_dependencies(azmap copy_shaders)

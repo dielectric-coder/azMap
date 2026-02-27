@@ -1,7 +1,5 @@
 # azMap
 
-> **W.I.P.** — This project is a work in progress and not very useful yet. Expect rough edges, missing features, and breaking changes.
-
 Interactive map projection viewer with two modes: azimuthal equidistant (full Earth) and orthographic (hemisphere sphere view). Given a center location, it projects the world map and draws a line to a target location, showing distance and azimuth information.
 
 ![OpenGL](https://img.shields.io/badge/OpenGL-3.3%2B-blue)
@@ -27,7 +25,7 @@ Interactive map projection viewer with two modes: azimuthal equidistant (full Ea
 
 ```bash
 # Install dependencies (Arch/Manjaro)
-sudo pacman -S glfw shapelib glew
+sudo pacman -S glfw shapelib glew curl
 
 # Build
 mkdir -p build && cd build && cmake .. && make
