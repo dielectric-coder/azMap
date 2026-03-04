@@ -147,6 +147,7 @@ static void print_usage(const char *prog)
     fprintf(stderr,
         "Usage: %s <center_lat> <center_lon> <target_lat> <target_lon> [options]\n"
         "       %s <target_lat> <target_lon> [options]  (center from config)\n"
+        "       %s [options]                             (restore saved session)\n"
         "\n"
         "  center_lat/lon  Center of azimuthal equidistant projection (degrees)\n"
         "  target_lat/lon  Second location to draw a line to (degrees)\n"
@@ -167,7 +168,7 @@ static void print_usage(const char *prog)
         "  Arrow keys   Pan the map\n"
         "  R            Reset view\n"
         "  Q / Esc      Quit\n",
-        prog, prog, DEFAULT_SHP_REL);
+        prog, prog, prog, DEFAULT_SHP_REL);
 }
 
 int main(int argc, char **argv)
@@ -192,6 +193,7 @@ int main(int argc, char **argv)
     }
 
     int opt_start; /* index where flag parsing begins */
+    int cli_center_given = 0; /* set when user passed explicit center coords */
 
     if (npos >= 4) {
         /* Full mode: center + target from CLI */
@@ -200,6 +202,7 @@ int main(int argc, char **argv)
         target_lat = atof(argv[3]);
         target_lon = atof(argv[4]);
         opt_start = 5;
+        cli_center_given = 1;
     } else if (npos >= 2 && has_config) {
         /* Config mode: center from config, target from CLI */
         center_lat = cfg.lat;
@@ -209,6 +212,17 @@ int main(int argc, char **argv)
         target_lat = atof(argv[1]);
         target_lon = atof(argv[2]);
         opt_start = 3;
+    } else if (npos == 0 && has_config && cfg.target_valid) {
+        /* Zero-arg mode: center from config, target from saved state */
+        center_lat = cfg.lat;
+        center_lon = cfg.lon;
+        if (cfg.name[0])
+            center_name = cfg.name;
+        target_lat = cfg.target_lat;
+        target_lon = cfg.target_lon;
+        if (cfg.target_name[0])
+            target_name = cfg.target_name;
+        opt_start = 1;
     } else {
         if (npos >= 2 && !has_config)
             fprintf(stderr, "Error: 2 args given but no valid config file found.\n"
@@ -255,6 +269,16 @@ int main(int argc, char **argv)
 
     const char *shp_path = shp_override ? shp_override : default_shp;
 
+    /* Restore saved view center if CLI didn't specify center */
+    if (!cli_center_given && cfg.view_valid) {
+        center_lat = cfg.view_center_lat;
+        center_lon = cfg.view_center_lon;
+    }
+
+    /* Restore projection mode before any geometry is built */
+    if (cfg.view_valid && cfg.view_proj_mode == 1)
+        projection_set_mode(PROJ_ORTHO);
+
     /* Set up projection */
     projection_set_center(center_lat, center_lon);
 
@@ -296,7 +320,9 @@ int main(int argc, char **argv)
     glfwWindowHint(GLFW_SAMPLES, 4);
     glfwWindowHint(GLFW_STENCIL_BITS, 8);
 
-    GLFWwindow *window = glfwCreateWindow(DEFAULT_WIDTH, DEFAULT_HEIGHT, "azMap", NULL, NULL);
+    int init_w = (cfg.window_valid) ? cfg.window_w : DEFAULT_WIDTH;
+    int init_h = (cfg.window_valid) ? cfg.window_h : DEFAULT_HEIGHT;
+    GLFWwindow *window = glfwCreateWindow(init_w, init_h, "azMap", NULL, NULL);
     if (!window) {
         fprintf(stderr, "Error: window creation failed\n");
         glfwTerminate();
@@ -352,10 +378,13 @@ int main(int argc, char **argv)
     else
         printf("Note: land polygons not found, skipping. Download ne_110m_land.\n");
 
-    /* Build grid (graticule) */
+    /* Build grid (graticule) — mode-appropriate */
     MapData grid;
     memset(&grid, 0, sizeof(grid));
-    grid_build(&grid);
+    if (projection_get_mode() == PROJ_ORTHO)
+        grid_build_geo(&grid);
+    else
+        grid_build(&grid);
 
     /* Night overlay */
     NightMesh nightmesh;
@@ -386,10 +415,13 @@ int main(int argc, char **argv)
     /* UI buttons */
     UI ui;
     ui_init(&ui);
-    int btn_home   = ui_add_button(&ui, "Home",   0, 0, 90, 30);
-    int btn_proj   = ui_add_button(&ui, "Proj",   0, 0, 90, 30);
-    int btn_mode   = ui_add_button(&ui, "Mode",   0, 0, 90, 30);
-    int btn_layers = ui_add_button(&ui, "Layers", 0, 0, 90, 30);
+    if (cfg.panel_visible)
+        ui.sidebar_visible = 1;
+    int btn_home    = ui_add_button(&ui, "Home",   0, 0, 90, 30);
+    int btn_proj    = ui_add_button(&ui, "Proj",   0, 0, 90, 30);
+    int btn_mode    = ui_add_button(&ui, "Mode",   0, 0, 90, 30);
+    int btn_layers  = ui_add_button(&ui, "Layers", 0, 0, 90, 30);
+    int btn_sidebar = ui_add_button(&ui, "Panel",  0, 0, 90, 30);
     /* Mode sub-buttons */
     int btn_opt1 = ui_add_button(&ui, "QRZ",  0, 0, 90, 30);
     int btn_opt2 = ui_add_button(&ui, "WSJT", 0, 0, 90, 30);
@@ -409,6 +441,16 @@ int main(int argc, char **argv)
     /* Camera — use actual framebuffer size (differs from window size on HiDPI) */
     Camera cam;
     camera_init(&cam);
+
+    /* Restore saved camera state */
+    if (cfg.view_valid) {
+        cam.zoom_km = cfg.view_zoom_km;
+        cam.pan_x = cfg.view_pan_x;
+        cam.pan_y = cfg.view_pan_y;
+        double max_diam = 2.0 * projection_get_radius();
+        if (cam.zoom_km > (float)max_diam) cam.zoom_km = (float)max_diam;
+        if (cam.zoom_km < 10.0f) cam.zoom_km = 10.0f;
+    }
 
     int fb_w, fb_h;
     glfwGetFramebufferSize(window, &fb_w, &fb_h);
@@ -472,14 +514,26 @@ int main(int argc, char **argv)
 
         glfwGetFramebufferSize(window, &fb_w, &fb_h);
 
+        /* Compute sidebar and map area widths */
+        int sidebar_fb_w = 0;
+        if (ui.sidebar_visible) {
+            sidebar_fb_w = (int)(300.0f * input.cursor_scale_x);
+            if (sidebar_fb_w > fb_w / 2) sidebar_fb_w = fb_w / 2;
+        }
+        ui.sidebar_fb_w = sidebar_fb_w;
+        int map_fb_w = fb_w - sidebar_fb_w;
+
+        glViewport(0, 0, map_fb_w, fb_h);
+        cam.aspect = (float)map_fb_w / (float)fb_h;
+
         float mvp[16];
         camera_get_mvp(&cam, mvp);
 
         /* Build labels at screen positions of center and target markers */
         float label_size = 14.0f;
         float cpx, cpy, tpx, tpy;
-        km_to_pixel(mvp, (float)cx, (float)cy, fb_w, fb_h, &cpx, &cpy);
-        km_to_pixel(mvp, (float)tx, (float)ty, fb_w, fb_h, &tpx, &tpy);
+        km_to_pixel(mvp, (float)cx, (float)cy, map_fb_w, fb_h, &cpx, &cpy);
+        km_to_pixel(mvp, (float)tx, (float)ty, map_fb_w, fb_h, &tpx, &tpy);
 
         /* Center label: offset above center marker */
         float cw = text_width(center_label, label_size);
@@ -516,7 +570,7 @@ int main(int argc, char **argv)
                 nvis++;
             }
             if (nvis > 1) total_w += (nvis - 1) * gap;
-            float bx = ((float)fb_w - total_w) * 0.5f;
+            float bx = ((float)map_fb_w - total_w) * 0.5f;
             for (int bi = 0; bi < ui.count; bi++) {
                 if (!ui.buttons[bi].visible) continue;
                 ui.buttons[bi].x = bx;
@@ -544,7 +598,7 @@ int main(int argc, char **argv)
             float popup_quads[5 * 12]; /* up to 5 quads * 6 verts * 2 floats */
             float popup_text[4096];
             int pq_count, pt_count;
-            ui_build_popup_geometry(&ui, fb_w, fb_h,
+            ui_build_popup_geometry(&ui, map_fb_w, fb_h,
                                     popup_quads, &pq_count,
                                     popup_text, &pt_count);
             renderer_upload_popup(&renderer, popup_quads, pq_count,
@@ -625,6 +679,8 @@ int main(int argc, char **argv)
                 ui_show_popup(&ui, "WSJT");
             } else if (ui.clicked == btn_opt3) {
                 ui_show_popup(&ui, "BCB");
+            } else if (ui.clicked == btn_sidebar) {
+                ui.sidebar_visible = !ui.sidebar_visible;
             } else if (ui.clicked == btn_home) {
                 /* Collapse everything back to home */
                 ui.buttons[btn_proj].visible = 1;
@@ -720,7 +776,7 @@ int main(int argc, char **argv)
             }
         }
 
-        /* Rebuild HUD text every second (includes live clock) */
+        /* Rebuild HUD text every second */
         {
             time_t now = time(NULL);
             if (now != last_text_update) {
@@ -729,21 +785,69 @@ int main(int argc, char **argv)
                 struct tm *gt = gmtime_r(&now, &gt_buf);
                 struct tm *lt = localtime_r(&now, &lt_buf);
                 if (!gt || !lt) continue;
-                char line1[128], line2[128];
-                snprintf(line1, sizeof(line1),
-                         "Dist: %.1f km  Az to: %.1f^  Az from: %.1f^",
-                         dist, az_to, az_from);
-                snprintf(line2, sizeof(line2),
-                         "Local: %02d:%02d:%02d  UTC: %02d:%02d:%02d",
-                         lt->tm_hour, lt->tm_min, lt->tm_sec,
-                         gt->tm_hour, gt->tm_min, gt->tm_sec);
-                float size = 20.0f;
-                float x1 = ((float)fb_w - text_width(line1, size)) * 0.5f;
-                float x2 = ((float)fb_w - text_width(line2, size)) * 0.5f;
-                int vc = text_build(line1, x1, 16.0f, size, text_verts, 4096);
-                vc += text_build(line2, x2, 16.0f + size * 1.4f, size,
-                                 text_verts + vc * 2, 4096 - vc);
-                renderer_upload_text(&renderer, text_verts, vc);
+
+                /* HUD: empty when sidebar is open, otherwise show info */
+                if (sidebar_fb_w <= 0) {
+                    char hud1[128], hud2[128];
+                    snprintf(hud1, sizeof(hud1),
+                             "Dist: %.1f km  Az to: %.1f^  Az from: %.1f^",
+                             dist, az_to, az_from);
+                    snprintf(hud2, sizeof(hud2),
+                             "Local: %02d:%02d:%02d  UTC: %02d:%02d:%02d",
+                             lt->tm_hour, lt->tm_min, lt->tm_sec,
+                             gt->tm_hour, gt->tm_min, gt->tm_sec);
+                    float size = 20.0f;
+                    float hx1 = ((float)map_fb_w - text_width(hud1, size)) * 0.5f;
+                    float hx2 = ((float)map_fb_w - text_width(hud2, size)) * 0.5f;
+                    int vc = text_build(hud1, hx1, 16.0f, size, text_verts, 4096);
+                    vc += text_build(hud2, hx2, 16.0f + size * 1.4f, size,
+                                     text_verts + vc * 2, 4096 - vc);
+                    renderer_upload_text(&renderer, text_verts, vc);
+                } else {
+                    renderer_upload_text(&renderer, text_verts, 0);
+                }
+
+                /* Sidebar: clocks + distance/azimuth */
+                if (sidebar_fb_w > 0) {
+                    float sb_verts[4096];
+                    float csz = 18.0f;
+                    float margin = 16.0f;
+                    float sbw = (float)sidebar_fb_w;
+                    float y = margin;
+                    int svc = 0;
+
+                    char utc_line[64], loc_line[64];
+                    snprintf(utc_line, sizeof(utc_line), "UTC  %02d:%02d:%02d",
+                             gt->tm_hour, gt->tm_min, gt->tm_sec);
+                    snprintf(loc_line, sizeof(loc_line), "LOC  %02d:%02d:%02d",
+                             lt->tm_hour, lt->tm_min, lt->tm_sec);
+                    svc += text_build(utc_line,
+                                      (sbw - text_width(utc_line, csz)) * 0.5f, y,
+                                      csz, sb_verts + svc * 2, 2048 - svc);
+                    y += csz * 1.5f;
+                    svc += text_build(loc_line,
+                                      (sbw - text_width(loc_line, csz)) * 0.5f, y,
+                                      csz, sb_verts + svc * 2, 2048 - svc);
+                    y += csz * 2.5f;
+
+                    char dist_line[64], azto_line[64], azfr_line[64];
+                    snprintf(dist_line, sizeof(dist_line), "DIST  %.1f KM", dist);
+                    snprintf(azto_line, sizeof(azto_line), "AZ TO  %.1f^", az_to);
+                    snprintf(azfr_line, sizeof(azfr_line), "AZ FROM  %.1f^", az_from);
+                    svc += text_build(dist_line,
+                                      (sbw - text_width(dist_line, csz)) * 0.5f, y,
+                                      csz, sb_verts + svc * 2, 2048 - svc);
+                    y += csz * 1.5f;
+                    svc += text_build(azto_line,
+                                      (sbw - text_width(azto_line, csz)) * 0.5f, y,
+                                      csz, sb_verts + svc * 2, 2048 - svc);
+                    y += csz * 1.5f;
+                    svc += text_build(azfr_line,
+                                      (sbw - text_width(azfr_line, csz)) * 0.5f, y,
+                                      csz, sb_verts + svc * 2, 2048 - svc);
+
+                    renderer_upload_sidebar_text(&renderer, sb_verts, svc);
+                }
             }
         }
 
@@ -759,10 +863,26 @@ int main(int argc, char **argv)
             }
         }
 
-        renderer_draw(&renderer, mvp, fb_w, fb_h);
+        renderer_draw(&renderer, mvp, map_fb_w, fb_h);
+
+        /* Draw sidebar */
+        if (sidebar_fb_w > 0) {
+            glViewport(map_fb_w, 0, sidebar_fb_w, fb_h);
+            renderer_upload_sidebar(&renderer, sidebar_fb_w, fb_h);
+            renderer_draw_sidebar(&renderer, sidebar_fb_w, fb_h);
+        }
 
         glfwSwapBuffers(window);
     }
+
+    /* Save session state — use window (screen) size, not framebuffer size */
+    int save_ww, save_wh;
+    glfwGetWindowSize(window, &save_ww, &save_wh);
+    config_save_state(target_lat, target_lon, target_name,
+                      cam.zoom_km, cam.pan_x, cam.pan_y,
+                      (int)projection_get_mode(),
+                      input.center_lat, input.center_lon,
+                      save_ww, save_wh, ui.sidebar_visible);
 
     /* Cleanup */
     if (has_qrz) qrz_cleanup();

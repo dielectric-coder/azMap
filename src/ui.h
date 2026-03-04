@@ -33,6 +33,10 @@ typedef struct {
     char     popup_result[4][64];
     int      popup_result_lines;
     int      popup_submitted;        /* 1 when Enter pressed, cleared by main */
+
+    /* Sidebar panel */
+    int      sidebar_visible;
+    int      sidebar_fb_w;           /* width in framebuffer pixels */
 } UI;
 
 /* Zero out state. */

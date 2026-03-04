@@ -100,6 +100,14 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     }
 }
 
+/* Check if a framebuffer x-coordinate is in the sidebar area. */
+static int in_sidebar(float fb_x)
+{
+    if (!g_input || !g_input->ui || !g_input->ui->sidebar_visible) return 0;
+    int map_fb_w = g_input->win_width - g_input->ui->sidebar_fb_w;
+    return fb_x >= (float)map_fb_w;
+}
+
 static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
 {
     (void)mods;
@@ -107,6 +115,11 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
         if (action == GLFW_PRESS) {
             double mx, my;
             glfwGetCursorPos(window, &mx, &my);
+
+            /* Consume clicks in sidebar area */
+            float fb_x = (float)mx * g_input->cursor_scale_x;
+            if (in_sidebar(fb_x)) return;
+
             g_input->press_x = mx;
             g_input->press_y = my;
             g_input->last_mouse_x = mx;
@@ -117,41 +130,41 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
 
             /* Check if press is on popup title bar */
             if (g_input->ui && g_input->ui->popup.visible) {
-                float fb_x = (float)mx * g_input->cursor_scale_x;
-                float fb_y = (float)my * g_input->cursor_scale_y;
+                float press_fb_x = (float)mx * g_input->cursor_scale_x;
+                float press_fb_y = (float)my * g_input->cursor_scale_y;
                 UIPopup *p = &g_input->ui->popup;
                 float title_h = 30.0f;
-                if (fb_x >= p->x && fb_x <= p->x + p->w &&
-                    fb_y >= p->y && fb_y <= p->y + title_h) {
+                if (press_fb_x >= p->x && press_fb_x <= p->x + p->w &&
+                    press_fb_y >= p->y && press_fb_y <= p->y + title_h) {
                     g_input->popup_dragging = 1;
                 }
             }
         } else {
             /* Release: if no drag occurred, treat as click */
             if (g_input->pressed && !g_input->dragging && g_input->ui) {
-                float fb_x = (float)g_input->press_x * g_input->cursor_scale_x;
-                float fb_y = (float)g_input->press_y * g_input->cursor_scale_y;
+                float click_fb_x = (float)g_input->press_x * g_input->cursor_scale_x;
+                float click_fb_y = (float)g_input->press_y * g_input->cursor_scale_y;
 
                 /* Popup intercepts clicks when visible */
                 if (g_input->ui->popup.visible) {
                     UI *u = g_input->ui;
                     UIPopup *p = &u->popup;
                     /* Close button hit test */
-                    if (fb_x >= u->popup_close_x &&
-                        fb_x <= u->popup_close_x + u->popup_close_w &&
-                        fb_y >= u->popup_close_y &&
-                        fb_y <= u->popup_close_y + u->popup_close_h) {
+                    if (click_fb_x >= u->popup_close_x &&
+                        click_fb_x <= u->popup_close_x + u->popup_close_w &&
+                        click_fb_y >= u->popup_close_y &&
+                        click_fb_y <= u->popup_close_y + u->popup_close_h) {
                         ui_hide_popup(u);
-                    } else if (fb_x < p->x || fb_x > p->x + p->w ||
-                               fb_y < p->y || fb_y > p->y + p->h) {
+                    } else if (click_fb_x < p->x || click_fb_x > p->x + p->w ||
+                               click_fb_y < p->y || click_fb_y > p->y + p->h) {
                         /* Click outside popup — pass through to buttons */
-                        int hit = ui_hit_test(u, fb_x, fb_y);
+                        int hit = ui_hit_test(u, click_fb_x, click_fb_y);
                         if (hit >= 0)
                             u->clicked = hit;
                     }
                     /* Click inside popup body — consume */
                 } else {
-                    int hit = ui_hit_test(g_input->ui, fb_x, fb_y);
+                    int hit = ui_hit_test(g_input->ui, click_fb_x, click_fb_y);
                     if (hit >= 0)
                         g_input->ui->clicked = hit;
                 }
@@ -166,6 +179,16 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
 static void cursor_pos_callback(GLFWwindow *window, double xpos, double ypos)
 {
     (void)window;
+
+    /* Ignore cursor movement in sidebar area */
+    {
+        float fb_x_check = (float)xpos * g_input->cursor_scale_x;
+        if (in_sidebar(fb_x_check) && !g_input->popup_dragging) {
+            g_input->last_mouse_x = xpos;
+            g_input->last_mouse_y = ypos;
+            return;
+        }
+    }
 
     /* Update hover when not pressed */
     if (!g_input->pressed && g_input->ui) {
@@ -251,8 +274,7 @@ static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
     if (height == 0) height = 1;
     g_input->win_width = width;
     g_input->win_height = height;
-    g_input->cam->aspect = (float)width / (float)height;
-    glViewport(0, 0, width, height);
+    /* Don't set aspect or glViewport here — main loop handles sidebar split */
     update_cursor_scale(window);
 }
 

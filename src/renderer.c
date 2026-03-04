@@ -688,6 +688,71 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
     glBindVertexArray(0);
 }
 
+void renderer_upload_sidebar(Renderer *r, int w, int h)
+{
+    float verts[] = {
+        0.0f, 0.0f,  (float)w, 0.0f,  (float)w, (float)h,
+        0.0f, 0.0f,  (float)w, (float)h,  0.0f, (float)h,
+    };
+    if (!r->sidebar_vao) {
+        glGenVertexArrays(1, &r->sidebar_vao);
+        glGenBuffers(1, &r->sidebar_vbo);
+    }
+    glBindVertexArray(r->sidebar_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->sidebar_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+}
+
+void renderer_upload_sidebar_text(Renderer *r, float *verts, int vertex_count)
+{
+    if (!r->sidebar_text_vao) {
+        glGenVertexArrays(1, &r->sidebar_text_vao);
+        glGenBuffers(1, &r->sidebar_text_vbo);
+    }
+    glBindVertexArray(r->sidebar_text_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->sidebar_text_vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertex_count * 2 * sizeof(float),
+                 verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->sidebar_text_vertex_count = vertex_count;
+}
+
+void renderer_draw_sidebar(const Renderer *r, int w, int h)
+{
+    if (!r->sidebar_vao) return;
+    glUseProgram(r->program);
+    glVertexAttrib1f(1, 1.0f);
+
+    float ortho[16];
+    memset(ortho, 0, sizeof(ortho));
+    ortho[0]  = 2.0f / (float)w;
+    ortho[5]  = -2.0f / (float)h;
+    ortho[10] = -1.0f;
+    ortho[12] = -1.0f;
+    ortho[13] = 1.0f;
+    ortho[15] = 1.0f;
+    glUniformMatrix4fv(r->mvp_loc, 1, GL_FALSE, ortho);
+
+    /* Background */
+    glUniform4f(r->color_loc, 0.06f, 0.06f, 0.10f, 0.95f);
+    glBindVertexArray(r->sidebar_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    /* Text */
+    if (r->sidebar_text_vao && r->sidebar_text_vertex_count > 0) {
+        glUniform4f(r->color_loc, 0.7f, 0.8f, 1.0f, 1.0f);
+        glBindVertexArray(r->sidebar_text_vao);
+        glDrawArrays(GL_LINES, 0, r->sidebar_text_vertex_count);
+    }
+
+    glBindVertexArray(0);
+}
+
 void renderer_destroy(Renderer *r)
 {
     glDeleteProgram(r->program);
@@ -709,4 +774,6 @@ void renderer_destroy(Renderer *r)
     if (r->btn_text_vao) { glDeleteVertexArrays(1, &r->btn_text_vao); glDeleteBuffers(1, &r->btn_text_vbo); }
     if (r->popup_bg_vao) { glDeleteVertexArrays(1, &r->popup_bg_vao); glDeleteBuffers(1, &r->popup_bg_vbo); }
     if (r->popup_text_vao) { glDeleteVertexArrays(1, &r->popup_text_vao); glDeleteBuffers(1, &r->popup_text_vbo); }
+    if (r->sidebar_vao) { glDeleteVertexArrays(1, &r->sidebar_vao); glDeleteBuffers(1, &r->sidebar_vbo); }
+    if (r->sidebar_text_vao) { glDeleteVertexArrays(1, &r->sidebar_text_vao); glDeleteBuffers(1, &r->sidebar_text_vbo); }
 }

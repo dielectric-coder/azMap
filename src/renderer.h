@@ -106,6 +106,13 @@ typedef struct {
     unsigned int popup_text_vbo;
     int          popup_text_vertex_count; /* GL_LINES */
     int          popup_close_hovered;
+
+    /* Sidebar panel (pixel-space) */
+    unsigned int sidebar_vao;
+    unsigned int sidebar_vbo;
+    unsigned int sidebar_text_vao;
+    unsigned int sidebar_text_vbo;
+    int          sidebar_text_vertex_count;
 } Renderer;
 
 /* Initialize shaders and GL state. Returns 0 on success. */
@@ -167,6 +174,15 @@ void renderer_upload_popup(Renderer *r,
 
 /* Draw everything. fb_w/fb_h needed for text overlay. */
 void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h);
+
+/* Upload sidebar background quad. */
+void renderer_upload_sidebar(Renderer *r, int w, int h);
+
+/* Upload sidebar text vertices (pixel-space GL_LINES). */
+void renderer_upload_sidebar_text(Renderer *r, float *verts, int vertex_count);
+
+/* Draw sidebar background + text (call after setting sidebar viewport). */
+void renderer_draw_sidebar(const Renderer *r, int w, int h);
 
 /* Cleanup GL resources. */
 void renderer_destroy(Renderer *r);
