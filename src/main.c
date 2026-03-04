@@ -505,6 +505,13 @@ int main(int argc, char **argv)
     int muf_active = 0, aurora_active = 0;
     int muf_fetching = 0, aurora_fetching = 0;
     time_t last_muf_fetch = 0, last_aurora_fetch = 0;
+    GeomagIndices geomag;
+    geomag_init(&geomag);
+    FetchRequest kp_fetch, bz_fetch;
+    memset(&kp_fetch, 0, sizeof(kp_fetch));
+    memset(&bz_fetch, 0, sizeof(bz_fetch));
+    int kp_fetching = 0, bz_fetching = 0;
+    time_t last_geomag_fetch = 0;
 
     /* Upload geometry to GPU */
     renderer_upload_map(&renderer, &map);
@@ -848,43 +855,70 @@ int main(int argc, char **argv)
                 text_count += 2;
 
                 /* MUF contour legend above LAYERS label */
-                if (muf_active && muf_data.legend_count > 0) {
+                int have_legend = (muf_active && muf_data.legend_count > 0);
+                int have_geomag = (aurora_active && geomag.valid);
+                if (have_legend || have_geomag) {
                     float leg_sz = 14.0f;
                     float swatch_w = 24.0f;
                     float gap = 6.0f;
                     float leg_line_h = leg_sz * 1.4f;
-                    int nc = muf_data.legend_count;
-                    /* Position: bottom-up from above LAYERS label */
-                    float leg_y = ui.section_layers_label_y - leg_sz - 18.0f;
-                    float leg_left = sb_left + line_inset;
                     float leg_line_verts[MUF_MAX_LEGEND * 4]; /* 2 verts * 2 floats */
                     float leg_colors[MUF_MAX_LEGEND][4];
                     float leg_text_verts[4096];
                     int ltvc = 0;
+                    int nc = 0;
+                    float leg_left = sb_left + line_inset;
+                    float leg_y = ui.section_layers_label_y - leg_sz - 18.0f;
 
-                    for (int ei = nc - 1; ei >= 0; ei--) {
-                        char label[16];
-                        if (muf_data.legend[ei].mhz == (int)muf_data.legend[ei].mhz)
-                            snprintf(label, sizeof(label), "%.0f MHz",
-                                     (double)muf_data.legend[ei].mhz);
-                        else
-                            snprintf(label, sizeof(label), "%.1f MHz",
-                                     (double)muf_data.legend[ei].mhz);
+                    /* MUF legend entries */
+                    if (have_legend) {
+                        nc = muf_data.legend_count;
+                        for (int ei = nc - 1; ei >= 0; ei--) {
+                            char label[16];
+                            if (muf_data.legend[ei].mhz == (int)muf_data.legend[ei].mhz)
+                                snprintf(label, sizeof(label), "%.0f MHz",
+                                         (double)muf_data.legend[ei].mhz);
+                            else
+                                snprintf(label, sizeof(label), "%.1f MHz",
+                                         (double)muf_data.legend[ei].mhz);
 
-                        /* Colored swatch line (left-aligned) */
-                        int vi = ei * 4;
-                        leg_line_verts[vi + 0] = leg_left;
-                        leg_line_verts[vi + 1] = leg_y + leg_sz * 0.5f;
-                        leg_line_verts[vi + 2] = leg_left + swatch_w;
-                        leg_line_verts[vi + 3] = leg_y + leg_sz * 0.5f;
-                        memcpy(leg_colors[ei], muf_data.legend[ei].color, sizeof(float) * 4);
+                            /* Colored swatch line (left-aligned) */
+                            int vi = ei * 4;
+                            leg_line_verts[vi + 0] = leg_left;
+                            leg_line_verts[vi + 1] = leg_y + leg_sz * 0.5f;
+                            leg_line_verts[vi + 2] = leg_left + swatch_w;
+                            leg_line_verts[vi + 3] = leg_y + leg_sz * 0.5f;
+                            memcpy(leg_colors[ei], muf_data.legend[ei].color, sizeof(float) * 4);
 
-                        /* Text label */
-                        ltvc += text_build(label, leg_left + swatch_w + gap, leg_y,
+                            /* Text label */
+                            ltvc += text_build(label, leg_left + swatch_w + gap, leg_y,
+                                               leg_sz, leg_text_verts + ltvc * 2,
+                                               2048 - ltvc);
+                            leg_y -= leg_line_h;
+                        }
+                    }
+
+                    /* Kp/Bz indices (right side of sidebar) */
+                    if (have_geomag) {
+                        float geo_right = sb_left + sbw - line_inset;
+                        float geo_y = ui.section_layers_label_y - leg_sz - 18.0f;
+                        char kp_label[32], bz_label[32];
+                        snprintf(kp_label, sizeof(kp_label), "Kp %.1f",
+                                 (double)geomag.kp);
+                        snprintf(bz_label, sizeof(bz_label), "Bz %.1f nT",
+                                 (double)geomag.bz);
+                        /* Right-align: position text so it ends at geo_right */
+                        float kp_w = text_width(kp_label, leg_sz);
+                        ltvc += text_build(kp_label, geo_right - kp_w, geo_y,
                                            leg_sz, leg_text_verts + ltvc * 2,
                                            2048 - ltvc);
-                        leg_y -= leg_line_h;
+                        geo_y -= leg_line_h;
+                        float bz_w = text_width(bz_label, leg_sz);
+                        ltvc += text_build(bz_label, geo_right - bz_w, geo_y,
+                                           leg_sz, leg_text_verts + ltvc * 2,
+                                           2048 - ltvc);
                     }
+
                     renderer_upload_legend(&renderer, leg_line_verts, leg_colors,
                                            nc, leg_text_verts, ltvc);
                 } else {
@@ -1008,6 +1042,16 @@ int main(int argc, char **argv)
                         aurora_fetching = 1;
                         last_aurora_fetch = time(NULL);
                     }
+                    /* Fetch Kp/Bz indices if not already fetched */
+                    if (!geomag.valid && !kp_fetching) {
+                        fetch_start(&kp_fetch, KP_URL);
+                        kp_fetching = 1;
+                    }
+                    if (!geomag.valid && !bz_fetching) {
+                        fetch_start(&bz_fetch, BZ_URL);
+                        bz_fetching = 1;
+                    }
+                    last_geomag_fetch = time(NULL);
                 } else {
                     renderer.aurora_vertex_count = 0;
                 }
@@ -1243,6 +1287,46 @@ int main(int argc, char **argv)
                 fetch_start(&aurora_fetch, AURORA_URL);
                 aurora_fetching = 1;
                 last_aurora_fetch = now;
+            }
+
+            /* Poll Kp/Bz fetch completion */
+            if (kp_fetching) {
+                int s = fetch_check(&kp_fetch);
+                if (s != 0) {
+                    kp_fetching = 0;
+                    if (s == 1) {
+                        char *json = fetch_take_response(&kp_fetch);
+                        if (json) {
+                            geomag_parse_kp(json, &geomag);
+                            free(json);
+                        }
+                    }
+                    fetch_cleanup(&kp_fetch);
+                }
+            }
+            if (bz_fetching) {
+                int s = fetch_check(&bz_fetch);
+                if (s != 0) {
+                    bz_fetching = 0;
+                    if (s == 1) {
+                        char *json = fetch_take_response(&bz_fetch);
+                        if (json) {
+                            geomag_parse_bz(json, &geomag);
+                            free(json);
+                        }
+                    }
+                    fetch_cleanup(&bz_fetch);
+                }
+            }
+
+            /* Auto-refresh Kp/Bz every OVERLAY_UPDATE_SEC while Aurora active */
+            if (aurora_active && !kp_fetching && !bz_fetching &&
+                now - last_geomag_fetch >= OVERLAY_UPDATE_SEC) {
+                fetch_start(&kp_fetch, KP_URL);
+                kp_fetching = 1;
+                fetch_start(&bz_fetch, BZ_URL);
+                bz_fetching = 1;
+                last_geomag_fetch = now;
             }
         }
 

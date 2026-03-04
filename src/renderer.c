@@ -620,7 +620,7 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glStencilMask(0x00);
         glStencilFunc(GL_LESS, 0x80, 0xFF);
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-        glUniform4f(r->color_loc, 0.12f, 0.15f, 0.10f, 1.0f);
+        glUniform4f(r->color_loc, 0.30f, 0.30f, 0.30f, 1.0f);
         glBindVertexArray(r->disc_vao);
         glDrawArrays(GL_TRIANGLE_FAN, 0, r->disc_vertex_count);
 
@@ -671,9 +671,9 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         }
     }
 
-    /* Coastlines - green */
+    /* Coastlines - dark gray */
     if (r->map_vao) {
-        glUniform4f(r->color_loc, 0.2f, 0.8f, 0.3f, 1.0f);
+        glUniform4f(r->color_loc, 0.35f, 0.35f, 0.35f, 1.0f);
         glBindVertexArray(r->map_vao);
         for (int i = 0; i < r->map_num_segments; i++) {
             glDrawArrays(GL_LINE_STRIP,

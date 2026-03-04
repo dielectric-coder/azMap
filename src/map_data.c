@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <math.h>
 #include <shapefil.h>
 #include "map_data.h"
 #include "projection.h"
@@ -184,12 +186,29 @@ static void project_nosplit(MapData *md)
         back[i] = (projection_forward(md->raw_lats[i], md->raw_lons[i], &x, &y) != 0);
     }
 
+    /* In AZEQ mode, mark vertices beyond 160° angular distance as "far".
+     * Rings containing any far vertex are skipped entirely (not clipped)
+     * to avoid stencil triangle-fan artifacts from distorted geometry. */
+    int is_azeq = (projection_get_mode() == PROJ_AZEQ);
+    int *far = NULL;
+    if (is_azeq) {
+        double clat, clon;
+        projection_get_center(&clat, &clon);
+        double max_dist = 160.0 / 180.0 * M_PI * EARTH_RADIUS_KM;
+        far = malloc(md->raw_count * sizeof(int));
+        if (far) {
+            for (int i = 0; i < md->raw_count; i++)
+                far[i] = (projection_distance(clat, clon,
+                            md->raw_lats[i], md->raw_lons[i]) > max_dist);
+        }
+    }
+
     /* Build clipped rings — each edge can add one intersection vertex */
     int max_out = md->raw_count * 2;
     double *clip_lats = malloc(max_out * sizeof(double));
     double *clip_lons = malloc(max_out * sizeof(double));
     if (!clip_lats || !clip_lons) {
-        free(clip_lats); free(clip_lons); free(back);
+        free(clip_lats); free(clip_lons); free(back); free(far);
         md->vertices = NULL; md->vertex_count = 0; md->num_segments = 0;
         return;
     }
@@ -201,6 +220,20 @@ static void project_nosplit(MapData *md)
         int base = md->raw_seg_starts[s];
         int count = md->raw_seg_counts[s];
         int ring_start = clip_count;
+
+        /* In AZEQ mode, skip entire ring if any vertex is near antipodal */
+        if (far) {
+            int has_far = 0;
+            for (int v = 0; v < count; v++) {
+                if (far[base + v]) { has_far = 1; break; }
+            }
+            if (has_far) {
+                md->segment_starts[s] = ring_start;
+                md->segment_counts[s] = 0;
+                md->segment_clamped[s] = 1;
+                continue;
+            }
+        }
 
         /* Check for back-hemisphere vertices */
         int has_back = 0, has_front = 0;
@@ -266,7 +299,7 @@ static void project_nosplit(MapData *md)
     /* Project clipped vertices */
     md->vertices = malloc(clip_count * 2 * sizeof(float));
     if (!md->vertices) {
-        free(clip_lats); free(clip_lons); free(back);
+        free(clip_lats); free(clip_lons); free(back); free(far);
         md->vertex_count = 0; md->num_segments = 0;
         return;
     }
@@ -278,9 +311,89 @@ static void project_nosplit(MapData *md)
     }
     md->vertex_count = clip_count;
 
+    /* Ortho mode: insert boundary arc vertices for "shortcut" edges.
+     * When clipping cuts a polygon ring at the hemisphere boundary, it
+     * creates direct edges between crossing points that don't follow the
+     * boundary circle arc. These shortcut edges cause the GL_TRIANGLE_FAN
+     * stencil inversion to cover the wrong area.  Fix by detecting edges
+     * where both endpoints are near the boundary circle and the edge is
+     * long, then inserting intermediate points along the boundary arc. */
+    if (projection_get_mode() == PROJ_ORTHO) {
+        float Rf = (float)projection_get_radius();
+        float min_r = Rf * 0.85f;          /* endpoints must be near boundary */
+        float max_edge_sq = Rf * Rf * 0.25f; /* edge > 0.5*R triggers arc */
+        #define ARC_PTS 12
+
+        /* Count extra vertices needed */
+        int extra = 0;
+        for (int s = 0; s < md->num_segments; s++) {
+            if (md->segment_clamped[s] || md->segment_counts[s] < 3) continue;
+            int st = md->segment_starts[s], cnt = md->segment_counts[s];
+            for (int v = 0; v < cnt; v++) {
+                int ci = st + v, ni = st + (v + 1) % cnt;
+                float x0 = md->vertices[ci*2], y0 = md->vertices[ci*2+1];
+                float x1 = md->vertices[ni*2], y1 = md->vertices[ni*2+1];
+                float r0 = sqrtf(x0*x0 + y0*y0);
+                float r1 = sqrtf(x1*x1 + y1*y1);
+                float dx = x1-x0, dy = y1-y0;
+                if (r0 > min_r && r1 > min_r && dx*dx+dy*dy > max_edge_sq)
+                    extra += ARC_PTS;
+            }
+        }
+
+        if (extra > 0) {
+            float *nv = malloc((md->vertex_count + extra) * 2 * sizeof(float));
+            if (nv) {
+                int nc = 0;
+                for (int s = 0; s < md->num_segments; s++) {
+                    int st = md->segment_starts[s], cnt = md->segment_counts[s];
+                    int ns = nc;
+                    if (md->segment_clamped[s] || cnt < 3) {
+                        memcpy(nv + nc*2, md->vertices + st*2,
+                               cnt * 2 * sizeof(float));
+                        nc += cnt;
+                    } else {
+                        for (int v = 0; v < cnt; v++) {
+                            int ci = st + v, ni = st + (v + 1) % cnt;
+                            nv[nc*2]   = md->vertices[ci*2];
+                            nv[nc*2+1] = md->vertices[ci*2+1];
+                            nc++;
+
+                            float x0 = md->vertices[ci*2], y0 = md->vertices[ci*2+1];
+                            float x1 = md->vertices[ni*2], y1 = md->vertices[ni*2+1];
+                            float r0 = sqrtf(x0*x0 + y0*y0);
+                            float r1 = sqrtf(x1*x1 + y1*y1);
+                            float dx = x1-x0, dy = y1-y0;
+                            if (r0 > min_r && r1 > min_r && dx*dx+dy*dy > max_edge_sq) {
+                                /* Insert arc along boundary circle */
+                                float a0 = atan2f(y0, x0);
+                                float a1 = atan2f(y1, x1);
+                                float da = a1 - a0;
+                                if (da >  (float)M_PI) da -= 2.0f*(float)M_PI;
+                                if (da < -(float)M_PI) da += 2.0f*(float)M_PI;
+                                for (int k = 1; k <= ARC_PTS; k++) {
+                                    float t = a0 + da * (float)k / (float)(ARC_PTS + 1);
+                                    nv[nc*2]   = Rf * cosf(t);
+                                    nv[nc*2+1] = Rf * sinf(t);
+                                    nc++;
+                                }
+                            }
+                        }
+                    }
+                    md->segment_starts[s] = ns;
+                    md->segment_counts[s] = nc - ns;
+                }
+                free(md->vertices);
+                md->vertices = nv;
+                md->vertex_count = nc;
+            }
+        }
+    }
+
     free(clip_lats);
     free(clip_lons);
     free(back);
+    free(far);
 }
 
 void map_data_reproject_nosplit(MapData *md)

@@ -4,6 +4,8 @@
 #define OVERLAY_UPDATE_SEC  900  /* 15 minutes */
 #define MUF_URL    "https://prop.kc2g.com/renders/current/mufd-normal-now.geojson"
 #define AURORA_URL "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json"
+#define KP_URL     "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
+#define BZ_URL     "https://services.swpc.noaa.gov/products/summary/solar-wind-mag-field.json"
 
 #define MUF_MAX_SEGMENTS 128
 #define MUF_MAX_LEGEND   16
@@ -63,5 +65,16 @@ int   aurora_parse_json(const char *json_str, AuroraGrid *g);
 void  aurora_mesh_init(AuroraMesh *m);
 void  aurora_mesh_free(AuroraMesh *m);
 void  aurora_mesh_build(AuroraMesh *m, const AuroraGrid *g);
+
+/* Geomagnetic indices (Kp + Bz) */
+typedef struct {
+    float kp;       /* Planetary K-index (0-9) */
+    float bz;       /* IMF Bz component (nT, negative = southward) */
+    int   valid;    /* 1 if data loaded */
+} GeomagIndices;
+
+void  geomag_init(GeomagIndices *g);
+int   geomag_parse_kp(const char *json_str, GeomagIndices *g);
+int   geomag_parse_bz(const char *json_str, GeomagIndices *g);
 
 #endif

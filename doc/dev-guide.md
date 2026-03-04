@@ -52,13 +52,13 @@ Drawn back to front in `renderer_draw()`:
 | Order | Layer | Color | Draw Mode |
 |-------|-------|-------|-----------|
 | 1 | Earth filled disc (ocean) | Dark blue-gray (0.12, 0.12, 0.25) | GL_TRIANGLE_FAN |
-| 2 | Land fill (stencil) | Dark green-gray (0.12, 0.15, 0.10) | GL_TRIANGLE_FAN (stencil) |
+| 2 | Land fill (stencil) | Medium gray (0.30, 0.30, 0.30) | GL_TRIANGLE_FAN (stencil) |
 | 3 | Earth boundary circle | Dark blue (0.15, 0.15, 0.3) | GL_LINE_LOOP |
 | 4 | Grid (rings+radials or parallels+meridians) | Dim (0.2, 0.2, 0.3) | GL_LINE_STRIP |
 | 5 | Night overlay | Dark (0.0, 0.0, 0.05) × per-vertex alpha | GL_TRIANGLES |
 | 5b | Aurora overlay | Green (0.0, 0.8, 0.2) × per-vertex alpha | GL_TRIANGLES |
 | 6 | Country borders | Gray (0.4, 0.4, 0.5) | GL_LINE_STRIP |
-| 7 | Coastlines | Green (0.2, 0.8, 0.3) | GL_LINE_STRIP |
+| 7 | Coastlines | Dark gray (0.35, 0.35, 0.35) | GL_LINE_STRIP |
 | 7b | MUF contour lines | Per-segment color (from KC2G GeoJSON) | GL_LINE_STRIP |
 | 8 | Target line (great circle) | Yellow (1.0, 0.9, 0.2) | GL_LINE_STRIP |
 | 9 | Center marker | White (1.0, 1.0, 1.0) | GL_TRIANGLE_FAN |
@@ -85,6 +85,10 @@ Land polygons from `ne_110m_land` are rendered as filled areas using the stencil
 3. **Color pass**: Draw disc with land color where `stencil > 0x80` (disc bit + odd inversions)
 
 This handles concave polygons and holes (e.g. Caspian Sea) via the odd-even fill rule without triangulation. Land polygons use `map_data_reproject_nosplit()` which clips polygon rings to the front hemisphere before projection: edges crossing the boundary are bisected (12-iteration binary search in lat/lon) to find the intersection point, back-hemisphere vertices are discarded, and boundary crossing points are inserted. The clipped rings are then projected via `projection_forward_clamped()`. Rings entirely in the back hemisphere are skipped (`segment_clamped` flag). This prevents back-hemisphere vertices from corrupting the stencil with incorrect fan triangles.
+
+**Boundary arc insertion** (ortho mode): After projection, shortcut edges between boundary crossing points are detected (both endpoints near the boundary circle and edge length > 0.5×radius). For each shortcut, 12 intermediate arc vertices are inserted along the hemisphere boundary circle, computed by angle interpolation. This prevents the stencil triangle fan from sweeping across the wrong area when a clipped polygon has multiple boundary crossings.
+
+**Antipodal skip** (AZEQ mode): In azimuthal equidistant mode, all points project successfully (no back hemisphere), but rings near the antipodal point are extremely distorted. Vertices beyond 160° angular distance from the projection center are marked as "far", and any ring containing a far vertex is skipped entirely to prevent stencil stripe artifacts.
 
 ### Great Circle Target Line
 
@@ -117,6 +121,14 @@ The aurora overlay displays aurora probability from the NOAA OVATION service. Im
 - **Parsing** (`aurora_parse_json()`): Populates an `AuroraGrid` — a 360×181 int array indexed by `[lon * 181 + (lat+90)]`.
 - **Mesh building** (`aurora_mesh_build()`): Same polar-grid approach as `nightmesh.c` (180 angular × 60 radial divisions). For each vertex, `projection_inverse()` converts km→lat/lon, then the nearest grid cell is looked up. Probability maps to alpha: 0–5% → transparent, 5–50% → 0.0–0.5, 50–100% → 0.5–0.75. Fully transparent quads are skipped.
 - **Rendering**: Drawn as GL_TRIANGLES with uniform green color (0.0, 0.8, 0.2) and per-vertex alpha, after the night overlay and before borders.
+
+### Geomagnetic Indices (Kp/Bz)
+
+When the Aurora layer is active, geomagnetic indices are fetched and displayed in the sidebar (right-aligned, next to the MUF legend area):
+
+- **Kp index**: Fetched from `https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json` — array of arrays, last entry contains the current Kp value (0–9 scale). Parsed by `geomag_parse_kp()`.
+- **Bz component**: Fetched from `https://services.swpc.noaa.gov/products/summary/solar-wind-mag-field.json` — JSON object with `"Bz"` string field (nT, negative = southward/geo-effective). Parsed by `geomag_parse_bz()`.
+- **Display**: `"Kp X.X"` and `"Bz X.X nT"` rendered right-aligned in the sidebar at 14px font size, same vertical position as MUF legend. Auto-refreshes every 15 minutes with the overlay data.
 
 ### Async HTTP Fetch
 

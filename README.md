@@ -20,7 +20,7 @@ Interactive map projection viewer with two modes: azimuthal equidistant (full Ea
 - Sidebar panel with UTC/local clocks, station info, distance/azimuth readouts
 - Rounded rectangle buttons with hover highlighting, organized in labeled sections (LAYERS / SOURCE)
 - **MUF contour overlay** — live Maximum Usable Frequency contour lines from KC2G (prop.kc2g.com), colored by HF band, with sidebar legend
-- **Aurora overlay** — live NOAA OVATION aurora probability heatmap (green, per-vertex alpha)
+- **Aurora overlay** — live NOAA OVATION aurora probability heatmap (green, per-vertex alpha), with Kp/Bz geomagnetic indices in sidebar
 - QRZ callsign lookup via popup with results displayed in sidebar
 - FIFO IPC for live target updates from swl dashboard
 - Non-blocking HTTP fetches (libcurl + pthread) with 15-minute auto-refresh for live overlays
@@ -84,6 +84,7 @@ This list is tentative and will likely change.
 2. WSJT-X integration
 3. ~~MUF contour overlay (KC2G)~~ Done
 4. ~~Aurora overlay (NOAA OVATION)~~ Done
+5. ~~Kp/Bz geomagnetic indices~~ Done
 
 ## License
 

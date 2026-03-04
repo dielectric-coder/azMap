@@ -145,10 +145,10 @@ All other features (day/night overlay, markers, labels, pan, zoom) work in both 
 ### Map Elements
 
 - **Dark blue circle** - Earth boundary
-- **Filled land** - Dark green-gray land masses (if `ne_110m_land` data available)
+- **Filled land** - Medium gray land masses (if `ne_110m_land` data available)
 - **Dim grid** - Range rings + radials (azimuthal equidistant) or parallels + meridians (orthographic)
 - **Gray lines** - Country borders (if data available)
-- **Green lines** - Coastlines
+- **Dark gray lines** - Coastlines
 - **Yellow line** - Great-circle path from center to target (curved arc in orthographic mode)
 - **White filled circle** - Center location marker
 - **Red outline circle** - Target location marker
@@ -172,6 +172,7 @@ The sidebar is always visible on the right side of the window. It displays:
 - **Distance and azimuth** readouts (shown only when a target is active)
 - **LAYERS section** — Aurora, Spor.E, MUF overlay toggle buttons
 - **MUF legend** — when the MUF layer is active, a color-coded legend of contour MHz values appears above the LAYERS label
+- **Kp/Bz indices** — when Aurora is active, geomagnetic Kp index and IMF Bz component are displayed right-aligned in the sidebar
 - **SOURCE section** — QRZ, WSJT, BCB buttons
 
 Section labels and horizontal divider lines separate the button groups.
@@ -186,7 +187,7 @@ The QRZ button opens a popup panel for looking up amateur radio callsigns. Type 
 
 ### Layer Buttons
 
-- **Aurora** — Toggles the live aurora probability heatmap overlay (green, semi-transparent). Data is fetched from the NOAA OVATION Aurora service (`services.swpc.noaa.gov`) and auto-refreshes every 15 minutes while active. The overlay shows aurora probability as a green heatmap with per-vertex alpha: probabilities below 5% are transparent, 5–50% ramp to half opacity, and 50–100% reach maximum opacity.
+- **Aurora** — Toggles the live aurora probability heatmap overlay (green, semi-transparent). Data is fetched from the NOAA OVATION Aurora service (`services.swpc.noaa.gov`) and auto-refreshes every 15 minutes while active. The overlay shows aurora probability as a green heatmap with per-vertex alpha: probabilities below 5% are transparent, 5–50% ramp to half opacity, and 50–100% reach maximum opacity. When active, also fetches and displays Kp index and Bz component from NOAA SWPC in the sidebar.
 - **MUF** — Toggles live Maximum Usable Frequency contour lines. Data is fetched from KC2G (`prop.kc2g.com`) as GeoJSON and auto-refreshes every 15 minutes while active. Each contour is drawn in its own color corresponding to the HF band frequency. When active, a color-coded legend showing the MHz values appears above the LAYERS label in the sidebar.
 - **Spor.E** — Sporadic E layer toggle (planned).
 

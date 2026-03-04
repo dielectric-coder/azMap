@@ -410,3 +410,57 @@ void aurora_mesh_build(AuroraMesh *m, const AuroraGrid *g)
 
     free(alpha_grid);
 }
+
+/* ── Geomagnetic indices (Kp + Bz) ────────────────────────────── */
+
+void geomag_init(GeomagIndices *g)
+{
+    g->kp = 0.0f;
+    g->bz = 0.0f;
+    g->valid = 0;
+}
+
+int geomag_parse_kp(const char *json_str, GeomagIndices *g)
+{
+    /* Format: array of arrays, first row is header, last row is most recent.
+     * Each row: ["time_tag", "Kp", "a_running", "station_count"] */
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root || !cJSON_IsArray(root)) { cJSON_Delete(root); return -1; }
+
+    int n = cJSON_GetArraySize(root);
+    if (n < 2) { cJSON_Delete(root); return -1; } /* need header + at least 1 data row */
+
+    /* Last entry is the most recent */
+    cJSON *last = cJSON_GetArrayItem(root, n - 1);
+    if (!last || !cJSON_IsArray(last) || cJSON_GetArraySize(last) < 2) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    cJSON *kp_val = cJSON_GetArrayItem(last, 1);
+    if (kp_val && cJSON_IsString(kp_val))
+        g->kp = (float)atof(kp_val->valuestring);
+    else if (kp_val && cJSON_IsNumber(kp_val))
+        g->kp = (float)kp_val->valuedouble;
+
+    g->valid = 1;
+    cJSON_Delete(root);
+    return 0;
+}
+
+int geomag_parse_bz(const char *json_str, GeomagIndices *g)
+{
+    /* Format: {"Bt": "5", "Bz": "-2", "TimeStamp": "..."} */
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) return -1;
+
+    cJSON *bz_val = cJSON_GetObjectItem(root, "Bz");
+    if (bz_val && cJSON_IsString(bz_val))
+        g->bz = (float)atof(bz_val->valuestring);
+    else if (bz_val && cJSON_IsNumber(bz_val))
+        g->bz = (float)bz_val->valuedouble;
+
+    g->valid = 1;
+    cJSON_Delete(root);
+    return 0;
+}
