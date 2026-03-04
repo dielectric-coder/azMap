@@ -998,24 +998,31 @@ int main(int argc, char **argv)
                                    &renderer, &last_text_update);
             } else if (ui.clicked == btn_aurora) {
                 aurora_active = !aurora_active;
-                if (aurora_active && !aurora_grid.valid && !aurora_fetching) {
-                    fetch_start(&aurora_fetch, AURORA_URL);
-                    aurora_fetching = 1;
-                    last_aurora_fetch = time(NULL);
-                }
-                if (!aurora_active) {
-                    /* Clear aurora geometry from GPU */
+                if (aurora_active) {
+                    if (aurora_grid.valid) {
+                        /* Re-upload existing data */
+                        aurora_mesh_build(&aurora_mesh, &aurora_grid);
+                        renderer_upload_aurora(&renderer, &aurora_mesh);
+                    } else if (!aurora_fetching) {
+                        fetch_start(&aurora_fetch, AURORA_URL);
+                        aurora_fetching = 1;
+                        last_aurora_fetch = time(NULL);
+                    }
+                } else {
                     renderer.aurora_vertex_count = 0;
                 }
             } else if (ui.clicked == btn_muf) {
                 muf_active = !muf_active;
-                if (muf_active && muf_data.raw_count == 0 && !muf_fetching) {
-                    fetch_start(&muf_fetch, MUF_URL);
-                    muf_fetching = 1;
-                    last_muf_fetch = time(NULL);
-                }
-                if (!muf_active) {
-                    /* Clear MUF geometry from GPU */
+                if (muf_active) {
+                    if (muf_data.raw_count > 0) {
+                        /* Re-upload existing data */
+                        renderer_upload_muf(&renderer, &muf_data);
+                    } else if (!muf_fetching) {
+                        fetch_start(&muf_fetch, MUF_URL);
+                        muf_fetching = 1;
+                        last_muf_fetch = time(NULL);
+                    }
+                } else {
                     renderer.muf_num_segments = 0;
                 }
             } else if (ui.clicked == btn_home) {
