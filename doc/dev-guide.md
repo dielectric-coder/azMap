@@ -15,6 +15,9 @@ src/
   grid.h/c          Grid generation (range rings/radials for azeq; parallels/meridians for ortho)
   solar.h/c         Subsolar point calculation from UTC time
   nightmesh.h/c     Day/night overlay mesh generation (per-vertex alpha)
+  overlay.h/c       MUF contour line + aurora heatmap overlay parsing and mesh building
+  fetch.h/c         Threaded non-blocking HTTP fetch (libcurl + pthread)
+  cJSON.h/c         Vendored cJSON library (MIT) for JSON parsing
   renderer.h/c      OpenGL shader compilation, VAO/VBO management, draw calls
   camera.h/c        Orthographic view state (zoom, pan), MVP matrix
   input.h/c         GLFW callbacks: scroll, drag, popup drag, keyboard
@@ -53,8 +56,10 @@ Drawn back to front in `renderer_draw()`:
 | 3 | Earth boundary circle | Dark blue (0.15, 0.15, 0.3) | GL_LINE_LOOP |
 | 4 | Grid (rings+radials or parallels+meridians) | Dim (0.2, 0.2, 0.3) | GL_LINE_STRIP |
 | 5 | Night overlay | Dark (0.0, 0.0, 0.05) × per-vertex alpha | GL_TRIANGLES |
+| 5b | Aurora overlay | Green (0.0, 0.8, 0.2) × per-vertex alpha | GL_TRIANGLES |
 | 6 | Country borders | Gray (0.4, 0.4, 0.5) | GL_LINE_STRIP |
 | 7 | Coastlines | Green (0.2, 0.8, 0.3) | GL_LINE_STRIP |
+| 7b | MUF contour lines | Per-segment color (from KC2G GeoJSON) | GL_LINE_STRIP |
 | 8 | Target line (great circle) | Yellow (1.0, 0.9, 0.2) | GL_LINE_STRIP |
 | 9 | Center marker | White (1.0, 1.0, 1.0) | GL_TRIANGLE_FAN |
 | 10 | Target marker | Red (1.0, 0.3, 0.2) | GL_LINE_LOOP |
@@ -64,6 +69,8 @@ Drawn back to front in `renderer_draw()`:
 | 13b | UI button outlines | Variable | GL_LINES (pixel-space) |
 | 13c | UI button text | White | GL_LINES (pixel-space) |
 | 13d | Section labels + dividers | White | GL_LINES (pixel-space) |
+| 13e | MUF legend swatches | Per-entry color | GL_LINES (pixel-space, lineWidth=3) |
+| 13f | MUF legend text | Light gray (0.85, 0.85, 0.95) | GL_LINES (pixel-space) |
 | 14 | Popup panel | Variable | GL_TRIANGLES + GL_LINES (pixel-space) |
 | 15 | HUD text (dist/az) | White (1.0, 1.0, 1.0) | GL_LINES (pixel-space) |
 
@@ -91,6 +98,36 @@ The day/night system uses two new modules:
 - **`nightmesh.c`** generates a polar mesh (180 angular × 60 radial divisions) covering the Earth disc. For each vertex, `projection_inverse()` converts km-space back to lat/lon, then `solar_zenith_angle()` determines the sun angle. A smoothstep function maps zenith angle to per-vertex alpha: transparent at <=80° (full day), max opacity at >=108° (astronomical night).
 
 The mesh uses 3-component vertices (x, y, alpha). The vertex shader passes the alpha attribute to the fragment shader, which multiplies it with the uniform color alpha. All non-night geometry uses a default vertex alpha of 1.0 set via `glVertexAttrib1f(1, 1.0f)`. The mesh is regenerated every 60 seconds.
+
+### MUF Contour Overlay
+
+The MUF overlay displays Maximum Usable Frequency contour lines from the KC2G propagation service (`prop.kc2g.com`). Implementation in `overlay.c`:
+
+- **Data source**: GeoJSON from `https://prop.kc2g.com/renders/current/mufd-normal-now.geojson` — a FeatureCollection of LineString features, each with a `level-value` (MHz) and `stroke` (hex color) in properties.
+- **Parsing** (`muf_parse_geojson()`): Extracts coordinates, stroke colors (hex→RGBA), and level values. Deduplicates legend entries by MHz value and sorts ascending.
+- **Projection** (`muf_reproject()`): Forward-projects raw lat/lon through `projection_forward()`, then splits segments at jumps >5000 km (same threshold as `map_data.c`). Each sub-segment inherits the parent segment's color.
+- **Storage**: `MufData` stores both raw lat/lon (for reprojection on center/mode change) and projected vertices with per-segment color arrays.
+- **Legend**: `MufLegendEntry` array stores unique (MHz, color) pairs. The sidebar renders colored line swatches (GL_LINES, lineWidth=3) with MHz labels, left-aligned above the LAYERS section label.
+
+### Aurora Heatmap Overlay
+
+The aurora overlay displays aurora probability from the NOAA OVATION service. Implementation in `overlay.c`:
+
+- **Data source**: JSON from `https://services.swpc.noaa.gov/json/ovation_aurora_latest.json` — contains a `coordinates` array of `[lon, lat, aurora_probability]` triplets at 1° resolution.
+- **Parsing** (`aurora_parse_json()`): Populates an `AuroraGrid` — a 360×181 int array indexed by `[lon * 181 + (lat+90)]`.
+- **Mesh building** (`aurora_mesh_build()`): Same polar-grid approach as `nightmesh.c` (180 angular × 60 radial divisions). For each vertex, `projection_inverse()` converts km→lat/lon, then the nearest grid cell is looked up. Probability maps to alpha: 0–5% → transparent, 5–50% → 0.0–0.5, 50–100% → 0.5–0.75. Fully transparent quads are skipped.
+- **Rendering**: Drawn as GL_TRIANGLES with uniform green color (0.0, 0.8, 0.2) and per-vertex alpha, after the night overlay and before borders.
+
+### Async HTTP Fetch
+
+`fetch.c` provides non-blocking HTTP GET using libcurl in a detached pthread:
+
+- `fetch_start(req, url)` — spawns a detached thread that performs `curl_easy_perform()`. Response body is accumulated in a realloc'd buffer.
+- `fetch_check(req)` — non-blocking mutex-protected status poll (0=pending, 1=done, -1=error). Called each frame from the main loop.
+- `fetch_take_response(req)` — transfers ownership of the response string to the caller.
+- `fetch_cleanup(req)` — frees URL and any remaining response data, destroys mutex.
+
+Both overlays auto-refresh every 15 minutes (`OVERLAY_UPDATE_SEC`) while their toggle is active. The first activation triggers an immediate fetch. Toggling off clears the GPU geometry (sets vertex/segment count to 0).
 
 ### Key Data Structures
 
@@ -194,7 +231,8 @@ make
 | GLFW 3 | Window, input, GL context | `glfw` |
 | GLEW | OpenGL extension loading | `glew` |
 | shapelib | Shapefile parsing | `shapelib` |
-| libcurl | HTTP requests (QRZ lookup) | `curl` |
+| libcurl | HTTP requests (QRZ lookup, MUF/aurora data) | `curl` |
+| pthread | Threaded non-blocking HTTP fetches | (glibc) |
 | OpenGL 3.3+ | Rendering | (driver) |
 
 ### Installing

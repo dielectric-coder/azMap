@@ -2,6 +2,7 @@
 #define RENDERER_H
 
 #include "map_data.h"
+#include "overlay.h"
 
 typedef struct {
     unsigned int program;
@@ -71,6 +72,29 @@ typedef struct {
     unsigned int night_vbo;
     int          night_vertex_count;
 
+    /* Aurora heatmap overlay (filled triangles with per-vertex alpha, km-space) */
+    unsigned int aurora_vao;
+    unsigned int aurora_vbo;
+    int          aurora_vertex_count;
+
+    /* MUF legend (pixel-space, colored line segments + text in sidebar) */
+    unsigned int legend_line_vao;
+    unsigned int legend_line_vbo;
+    int          legend_line_starts[MUF_MAX_LEGEND];
+    float        legend_line_colors[MUF_MAX_LEGEND][4];
+    int          legend_line_count;  /* number of legend entries */
+    unsigned int legend_text_vao;
+    unsigned int legend_text_vbo;
+    int          legend_text_vertex_count;
+
+    /* MUF contour lines (per-segment color, km-space) */
+    unsigned int muf_vao;
+    unsigned int muf_vbo;
+    int          muf_segment_starts[MUF_MAX_SEGMENTS];
+    int          muf_segment_counts[MUF_MAX_SEGMENTS];
+    float        muf_segment_colors[MUF_MAX_SEGMENTS][4];
+    int          muf_num_segments;
+
     /* Text overlay (pixel-space, HUD) */
     unsigned int text_vao;
     unsigned int text_vbo;
@@ -104,7 +128,7 @@ typedef struct {
     int          btn_offsets[16]; /* per-button vertex offset */
     int          btn_counts[16];  /* per-button vertex count */
     int          btn_hovered_quad; /* visible-button index of hovered button (-1 = none) */
-    int          btn_active_quad;  /* visible-button index of active/toggled button (-1 = none) */
+    unsigned int btn_active_mask;  /* bitmask of active/toggled buttons (by visible-button index) */
 
     /* Popup panel (pixel-space) */
     unsigned int popup_bg_vao;
@@ -153,6 +177,12 @@ void renderer_upload_grid(Renderer *r, const MapData *md);
 /* Upload night overlay mesh (GL_TRIANGLES, 3 floats per vertex: x, y, alpha). */
 void renderer_upload_night(Renderer *r, const float *vertices, int vertex_count);
 
+/* Upload aurora overlay mesh (GL_TRIANGLES, 3 floats per vertex: x, y, alpha). */
+void renderer_upload_aurora(Renderer *r, const AuroraMesh *m);
+
+/* Upload MUF contour line data to GPU. */
+void renderer_upload_muf(Renderer *r, const MufData *m);
+
 /* Upload text overlay vertices (pixel-space GL_LINES). */
 void renderer_upload_text(Renderer *r, float *verts, int vertex_count);
 
@@ -174,7 +204,15 @@ void renderer_upload_buttons(Renderer *r,
                              float *outline_verts, int outline_vert_count,
                              int *ol_offsets, int *ol_counts,
                              float *text_verts, int text_vert_count,
-                             int btn_count, int hovered_quad, int active_quad);
+                             int btn_count, int hovered_quad,
+                             unsigned int active_mask);
+
+/* Upload MUF legend geometry (pixel-space colored line swatches + text labels).
+ * line_verts: 2 verts per entry (GL_LINES), text_verts: GL_LINES label glyphs.
+ * colors: RGBA per entry, count: number of legend entries. */
+void renderer_upload_legend(Renderer *r,
+                            float *line_verts, float colors[][4], int count,
+                            float *text_verts, int text_vert_count);
 
 /* Draw UI buttons in their own full-window viewport pass. */
 void renderer_draw_buttons(const Renderer *r, int fb_w, int fb_h);

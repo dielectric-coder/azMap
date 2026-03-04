@@ -25,6 +25,8 @@
 #include "nightmesh.h"
 #include "ui.h"
 #include "qrz.h"
+#include "overlay.h"
+#include "fetch.h"
 
 #define DEFAULT_WIDTH  800
 #define DEFAULT_HEIGHT 800
@@ -490,6 +492,20 @@ int main(int argc, char **argv)
     NightMesh nightmesh;
     nightmesh_init(&nightmesh);
 
+    /* MUF / Aurora overlays */
+    MufData muf_data;
+    muf_data_init(&muf_data);
+    AuroraGrid aurora_grid;
+    aurora_grid_init(&aurora_grid);
+    AuroraMesh aurora_mesh;
+    aurora_mesh_init(&aurora_mesh);
+    FetchRequest muf_fetch, aurora_fetch;
+    memset(&muf_fetch, 0, sizeof(muf_fetch));
+    memset(&aurora_fetch, 0, sizeof(aurora_fetch));
+    int muf_active = 0, aurora_active = 0;
+    int muf_fetching = 0, aurora_fetching = 0;
+    time_t last_muf_fetch = 0, last_aurora_fetch = 0;
+
     /* Upload geometry to GPU */
     renderer_upload_map(&renderer, &map);
     if (has_borders)
@@ -654,6 +670,15 @@ int main(int argc, char **argv)
                 renderer_upload_grid(&renderer, &grid);
             }
             last_sun_update = 0; /* force night mesh rebuild */
+            /* Reproject overlays */
+            if (muf_active && muf_data.raw_count > 0) {
+                muf_reproject(&muf_data);
+                renderer_upload_muf(&renderer, &muf_data);
+            }
+            if (aurora_active && aurora_grid.valid) {
+                aurora_mesh_build(&aurora_mesh, &aurora_grid);
+                renderer_upload_aurora(&renderer, &aurora_mesh);
+            }
         }
 
         /* Update marker size relative to zoom */
@@ -727,7 +752,7 @@ int main(int argc, char **argv)
 
             /* Sidebar buttons: positioned in full-window framebuffer coords.
              * Layout from bottom up:
-             *   MODES label + line + [QRZ] [WSJT] [BCB]
+             *   SOURCE label + line + [QRZ] [WSJT] [BCB]
              *   LAYERS label + line + [AURORA] [SPOR.E] [MUF]
              */
             if (sidebar_fb_w > 0) {
@@ -742,7 +767,7 @@ int main(int argc, char **argv)
                 /* Start from bottom */
                 float by = (float)fb_h - bh - sb_margin;
 
-                /* Bottom row: QRZ, WSJT, BCB (MODES section) */
+                /* Bottom row: QRZ, WSJT, BCB (SOURCE section) */
                 int bottom_btns[] = { btn_opt1, btn_opt2, btn_opt3 };
                 float row_w = 0;
                 for (int i = 0; i < 3; i++) row_w += ui.buttons[bottom_btns[i]].w;
@@ -753,7 +778,7 @@ int main(int argc, char **argv)
                     ui.buttons[bottom_btns[i]].y = by;
                     rx += ui.buttons[bottom_btns[i]].w + sb_gap;
                 }
-                /* MODES label + line sits above the buttons */
+                /* SOURCE label + line sits above the buttons */
                 ui.section_modes_y = by - line_gap - 2.0f; /* line Y (full-window) */
                 ui.section_modes_label_y = ui.section_modes_y - label_h - 8.0f;
 
@@ -809,27 +834,75 @@ int main(int argc, char **argv)
                 btn_text[li+3] = ui.section_layers_y;
                 text_count += 2;
 
-                /* "MODES" label */
-                lw = text_width("MODES", lsz);
-                text_count += text_build("MODES",
+                /* "SOURCE" label */
+                lw = text_width("SOURCE", lsz);
+                text_count += text_build("SOURCE",
                     sb_left + (sbw - lw) * 0.5f, ui.section_modes_label_y,
                     lsz, btn_text + text_count * 2, 8192 - text_count);
-                /* Horizontal line below MODES */
+                /* Horizontal line below SOURCE */
                 li = text_count * 2;
                 btn_text[li+0] = sb_left + line_inset;
                 btn_text[li+1] = ui.section_modes_y;
                 btn_text[li+2] = sb_left + sbw - line_inset;
                 btn_text[li+3] = ui.section_modes_y;
                 text_count += 2;
+
+                /* MUF contour legend above LAYERS label */
+                if (muf_active && muf_data.legend_count > 0) {
+                    float leg_sz = 14.0f;
+                    float swatch_w = 24.0f;
+                    float gap = 6.0f;
+                    float leg_line_h = leg_sz * 1.4f;
+                    int nc = muf_data.legend_count;
+                    /* Position: bottom-up from above LAYERS label */
+                    float leg_y = ui.section_layers_label_y - leg_sz - 18.0f;
+                    float leg_left = sb_left + line_inset;
+                    float leg_line_verts[MUF_MAX_LEGEND * 4]; /* 2 verts * 2 floats */
+                    float leg_colors[MUF_MAX_LEGEND][4];
+                    float leg_text_verts[4096];
+                    int ltvc = 0;
+
+                    for (int ei = nc - 1; ei >= 0; ei--) {
+                        char label[16];
+                        if (muf_data.legend[ei].mhz == (int)muf_data.legend[ei].mhz)
+                            snprintf(label, sizeof(label), "%.0f MHz",
+                                     (double)muf_data.legend[ei].mhz);
+                        else
+                            snprintf(label, sizeof(label), "%.1f MHz",
+                                     (double)muf_data.legend[ei].mhz);
+
+                        /* Colored swatch line (left-aligned) */
+                        int vi = ei * 4;
+                        leg_line_verts[vi + 0] = leg_left;
+                        leg_line_verts[vi + 1] = leg_y + leg_sz * 0.5f;
+                        leg_line_verts[vi + 2] = leg_left + swatch_w;
+                        leg_line_verts[vi + 3] = leg_y + leg_sz * 0.5f;
+                        memcpy(leg_colors[ei], muf_data.legend[ei].color, sizeof(float) * 4);
+
+                        /* Text label */
+                        ltvc += text_build(label, leg_left + swatch_w + gap, leg_y,
+                                           leg_sz, leg_text_verts + ltvc * 2,
+                                           2048 - ltvc);
+                        leg_y -= leg_line_h;
+                    }
+                    renderer_upload_legend(&renderer, leg_line_verts, leg_colors,
+                                           nc, leg_text_verts, ltvc);
+                } else {
+                    renderer.legend_line_count = 0;
+                    renderer.legend_text_vertex_count = 0;
+                }
             }
 
-            /* Compute active quad: highlight Proj button when in ortho mode */
-            int active_quad = -1;
-            if (projection_get_mode() == PROJ_ORTHO) {
+            /* Compute active button mask (bitmask by visible-button index) */
+            unsigned int active_mask = 0;
+            {
                 int vis = 0;
                 for (int bi = 0; bi < ui.count; bi++) {
                     if (!ui.buttons[bi].visible) continue;
-                    if (bi == btn_proj) { active_quad = vis; break; }
+                    if ((bi == btn_proj && projection_get_mode() == PROJ_ORTHO) ||
+                        (bi == btn_aurora && aurora_active) ||
+                        (bi == btn_muf && muf_active))
+                        active_mask |= (1u << vis);
                     vis++;
                 }
             }
@@ -843,7 +916,7 @@ int main(int argc, char **argv)
                                         btn_outlines, outline_count,
                                         ol_offsets, ol_counts,
                                         btn_text, text_count,
-                                        nvis, hovered_quad, active_quad);
+                                        nvis, hovered_quad, active_mask);
         }
 
         /* Build and upload popup geometry */
@@ -888,6 +961,15 @@ int main(int argc, char **argv)
                 renderer_upload_earth_circle(&renderer, projection_get_radius());
                 /* Force night mesh rebuild */
                 last_sun_update = 0;
+                /* Reproject overlays */
+                if (muf_active && muf_data.raw_count > 0) {
+                    muf_reproject(&muf_data);
+                    renderer_upload_muf(&renderer, &muf_data);
+                }
+                if (aurora_active && aurora_grid.valid) {
+                    aurora_mesh_build(&aurora_mesh, &aurora_grid);
+                    renderer_upload_aurora(&renderer, &aurora_mesh);
+                }
                 /* Clamp zoom */
                 double max_diam = 2.0 * projection_get_radius();
                 if (cam.zoom_km > (float)max_diam)
@@ -914,6 +996,28 @@ int main(int argc, char **argv)
                 /* BCB: just clear info */
                 clear_target_state(&ui, &dist, &az_to, &az_from,
                                    &renderer, &last_text_update);
+            } else if (ui.clicked == btn_aurora) {
+                aurora_active = !aurora_active;
+                if (aurora_active && !aurora_grid.valid && !aurora_fetching) {
+                    fetch_start(&aurora_fetch, AURORA_URL);
+                    aurora_fetching = 1;
+                    last_aurora_fetch = time(NULL);
+                }
+                if (!aurora_active) {
+                    /* Clear aurora geometry from GPU */
+                    renderer.aurora_vertex_count = 0;
+                }
+            } else if (ui.clicked == btn_muf) {
+                muf_active = !muf_active;
+                if (muf_active && muf_data.raw_count == 0 && !muf_fetching) {
+                    fetch_start(&muf_fetch, MUF_URL);
+                    muf_fetching = 1;
+                    last_muf_fetch = time(NULL);
+                }
+                if (!muf_active) {
+                    /* Clear MUF geometry from GPU */
+                    renderer.muf_num_segments = 0;
+                }
             } else if (ui.clicked == btn_home) {
                 ui_hide_popup(&ui);
             }
@@ -1076,6 +1180,65 @@ int main(int argc, char **argv)
             }
         }
 
+        /* MUF / Aurora overlay: poll fetches and auto-refresh */
+        {
+            time_t now = time(NULL);
+
+            /* Poll MUF fetch completion */
+            if (muf_fetching) {
+                int s = fetch_check(&muf_fetch);
+                if (s != 0) {
+                    muf_fetching = 0;
+                    if (s == 1) {
+                        char *json = fetch_take_response(&muf_fetch);
+                        if (json) {
+                            muf_data_free(&muf_data);
+                            muf_data_init(&muf_data);
+                            muf_parse_geojson(json, &muf_data);
+                            free(json);
+                            if (muf_active && muf_data.num_segments > 0)
+                                renderer_upload_muf(&renderer, &muf_data);
+                        }
+                    }
+                    fetch_cleanup(&muf_fetch);
+                }
+            }
+
+            /* Poll aurora fetch completion */
+            if (aurora_fetching) {
+                int s = fetch_check(&aurora_fetch);
+                if (s != 0) {
+                    aurora_fetching = 0;
+                    if (s == 1) {
+                        char *json = fetch_take_response(&aurora_fetch);
+                        if (json) {
+                            aurora_parse_json(json, &aurora_grid);
+                            free(json);
+                            if (aurora_active && aurora_grid.valid) {
+                                aurora_mesh_build(&aurora_mesh, &aurora_grid);
+                                renderer_upload_aurora(&renderer, &aurora_mesh);
+                            }
+                        }
+                    }
+                    fetch_cleanup(&aurora_fetch);
+                }
+            }
+
+            /* Auto-refresh every OVERLAY_UPDATE_SEC while active */
+            if (muf_active && !muf_fetching &&
+                now - last_muf_fetch >= OVERLAY_UPDATE_SEC) {
+                fetch_start(&muf_fetch, MUF_URL);
+                muf_fetching = 1;
+                last_muf_fetch = now;
+            }
+            if (aurora_active && !aurora_fetching &&
+                now - last_aurora_fetch >= OVERLAY_UPDATE_SEC) {
+                fetch_start(&aurora_fetch, AURORA_URL);
+                aurora_fetching = 1;
+                last_aurora_fetch = now;
+            }
+        }
+
         renderer_draw(&renderer, mvp, map_fb_w, fb_h);
 
         /* Draw sidebar */
@@ -1112,6 +1275,9 @@ int main(int argc, char **argv)
     if (has_land) map_data_free(&land);
     free(grid.vertices);
     nightmesh_free(&nightmesh);
+    muf_data_free(&muf_data);
+    aurora_grid_free(&aurora_grid);
+    aurora_mesh_free(&aurora_mesh);
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

@@ -18,9 +18,12 @@ Interactive map projection viewer with two modes: azimuthal equidistant (full Ea
 - North pole indicator triangle
 - Real-time day/night overlay with smooth twilight gradient (civil, nautical, astronomical)
 - Sidebar panel with UTC/local clocks, station info, distance/azimuth readouts
-- Rounded rectangle buttons with hover highlighting, organized in labeled sections (LAYERS / MODES)
+- Rounded rectangle buttons with hover highlighting, organized in labeled sections (LAYERS / SOURCE)
+- **MUF contour overlay** — live Maximum Usable Frequency contour lines from KC2G (prop.kc2g.com), colored by HF band, with sidebar legend
+- **Aurora overlay** — live NOAA OVATION aurora probability heatmap (green, per-vertex alpha)
 - QRZ callsign lookup via popup with results displayed in sidebar
 - FIFO IPC for live target updates from swl dashboard
+- Non-blocking HTTP fetches (libcurl + pthread) with 15-minute auto-refresh for live overlays
 - Smooth zoom (10 km to full Earth) and pan
 - Vector stroke font for all text (no external font dependencies)
 
@@ -67,7 +70,8 @@ Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/) shape
 | QRZ button | Callsign lookup via popup, results in sidebar |
 | WSJT button | WSJT-X integration (placeholder) |
 | BCB button | Clear station info, target line, and distance/azimuth |
-| Aurora / Spor.E / MUF | Layer toggles (planned) |
+| Aurora button | Toggle live aurora probability heatmap overlay |
+| MUF button | Toggle live MUF contour lines overlay with sidebar legend |
 | R | Reset view |
 | Q / Esc | Quit |
 
@@ -78,6 +82,8 @@ This list is tentative and will likely change.
 0. ~~Configuration file for QTH (home station location)~~ Done
 1. ~~QRZ callsign lookup~~ Done
 2. WSJT-X integration
+3. ~~MUF contour overlay (KC2G)~~ Done
+4. ~~Aurora overlay (NOAA OVATION)~~ Done
 
 ## License
 

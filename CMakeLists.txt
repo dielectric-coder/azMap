@@ -40,6 +40,9 @@ add_executable(azmap
     src/nightmesh.c
     src/ui.c
     src/qrz.c
+    src/cJSON.c
+    src/overlay.c
+    src/fetch.c
 )
 
 target_include_directories(azmap PRIVATE
@@ -57,6 +60,7 @@ target_link_libraries(azmap PRIVATE
     ${CURL_LIBRARIES}
     OpenGL::GL
     m
+    pthread
 )
 
 target_compile_options(azmap PRIVATE

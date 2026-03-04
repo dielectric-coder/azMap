@@ -170,8 +170,9 @@ The sidebar is always visible on the right side of the window. It displays:
 - **UTC and local clocks** at the top
 - **Station info** (from swl dashboard or QRZ lookup) in the middle
 - **Distance and azimuth** readouts (shown only when a target is active)
-- **LAYERS section** — Aurora, Spor.E, MUF buttons (planned)
-- **MODES section** — QRZ, WSJT, BCB buttons
+- **LAYERS section** — Aurora, Spor.E, MUF overlay toggle buttons
+- **MUF legend** — when the MUF layer is active, a color-coded legend of contour MHz values appears above the LAYERS label
+- **SOURCE section** — QRZ, WSJT, BCB buttons
 
 Section labels and horizontal divider lines separate the button groups.
 
@@ -183,7 +184,13 @@ The QRZ button opens a popup panel for looking up amateur radio callsigns. Type 
 - Press Esc or the X button to close
 - QRZ credentials (`qrz_user` and `qrz_pass`) must be set in `~/.config/azmap.conf`
 
-### Mode Buttons
+### Layer Buttons
+
+- **Aurora** — Toggles the live aurora probability heatmap overlay (green, semi-transparent). Data is fetched from the NOAA OVATION Aurora service (`services.swpc.noaa.gov`) and auto-refreshes every 15 minutes while active. The overlay shows aurora probability as a green heatmap with per-vertex alpha: probabilities below 5% are transparent, 5–50% ramp to half opacity, and 50–100% reach maximum opacity.
+- **MUF** — Toggles live Maximum Usable Frequency contour lines. Data is fetched from KC2G (`prop.kc2g.com`) as GeoJSON and auto-refreshes every 15 minutes while active. Each contour is drawn in its own color corresponding to the HF band frequency. When active, a color-coded legend showing the MHz values appears above the LAYERS label in the sidebar.
+- **Spor.E** — Sporadic E layer toggle (planned).
+
+### Source Buttons
 
 - **QRZ** — Opens callsign lookup popup. Clears previous station info and target.
 - **WSJT** — Opens WSJT popup (placeholder). Clears previous info.
@@ -197,6 +204,8 @@ The QRZ button opens a popup panel for looking up amateur radio callsigns. Type 
 | Left mouse drag | Pan the map |
 | Arrow keys | Pan the map |
 | Proj button | Toggle azimuthal equidistant / orthographic projection |
+| Aurora button | Toggle live aurora probability heatmap overlay |
+| MUF button | Toggle live MUF contour lines overlay with sidebar legend |
 | QRZ button | Open callsign lookup popup (clears previous info) |
 | WSJT button | Open WSJT popup (clears previous info) |
 | BCB button | Clear station info, target, and distance/azimuth |

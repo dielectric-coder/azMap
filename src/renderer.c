@@ -344,6 +344,49 @@ void renderer_upload_night(Renderer *r, const float *vertices, int vertex_count)
     r->night_vertex_count = vertex_count;
 }
 
+void renderer_upload_aurora(Renderer *r, const AuroraMesh *m)
+{
+    if (!r->aurora_vao) {
+        glGenVertexArrays(1, &r->aurora_vao);
+        glGenBuffers(1, &r->aurora_vbo);
+    }
+    glBindVertexArray(r->aurora_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->aurora_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m->vertex_count * 3 * sizeof(float),
+                 m->vertices, GL_DYNAMIC_DRAW);
+    /* attribute 0: position (x, y) */
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+    /* attribute 1: alpha */
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float),
+                          (void *)(2 * sizeof(float)));
+    glBindVertexArray(0);
+    r->aurora_vertex_count = m->vertex_count;
+}
+
+void renderer_upload_muf(Renderer *r, const MufData *m)
+{
+    if (!r->muf_vao) {
+        glGenVertexArrays(1, &r->muf_vao);
+        glGenBuffers(1, &r->muf_vbo);
+    }
+    glBindVertexArray(r->muf_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->muf_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m->vertex_count * 2 * sizeof(float),
+                 m->vertices, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+
+    r->muf_num_segments = m->num_segments;
+    for (int i = 0; i < m->num_segments; i++) {
+        r->muf_segment_starts[i] = m->segment_starts[i];
+        r->muf_segment_counts[i] = m->segment_counts[i];
+        memcpy(r->muf_segment_colors[i], m->segment_colors[i], 4 * sizeof(float));
+    }
+}
+
 void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int split)
 {
     if (!r->label_vao) {
@@ -384,7 +427,8 @@ void renderer_upload_buttons(Renderer *r,
                              float *outline_verts, int outline_vert_count,
                              int *ol_offsets, int *ol_counts,
                              float *text_verts, int text_vert_count,
-                             int btn_count, int hovered_quad, int active_quad)
+                             int btn_count, int hovered_quad,
+                             unsigned int active_mask)
 {
     /* Background fill */
     if (!r->btn_bg_vao) {
@@ -436,7 +480,45 @@ void renderer_upload_buttons(Renderer *r,
         r->btn_outline_counts[i] = ol_counts[i];
     }
     r->btn_hovered_quad = hovered_quad;
-    r->btn_active_quad = active_quad;
+    r->btn_active_mask = active_mask;
+}
+
+void renderer_upload_legend(Renderer *r,
+                            float *line_verts, float colors[][4], int count,
+                            float *text_verts, int text_vert_count)
+{
+    /* Colored line swatches (one GL_LINES pair per entry) */
+    if (!r->legend_line_vao) {
+        glGenVertexArrays(1, &r->legend_line_vao);
+        glGenBuffers(1, &r->legend_line_vbo);
+    }
+    glBindVertexArray(r->legend_line_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->legend_line_vbo);
+    glBufferData(GL_ARRAY_BUFFER, count * 2 * 2 * sizeof(float),
+                 line_verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+
+    r->legend_line_count = count;
+    for (int i = 0; i < count && i < MUF_MAX_LEGEND; i++) {
+        r->legend_line_starts[i] = i * 2; /* 2 verts per line */
+        memcpy(r->legend_line_colors[i], colors[i], 4 * sizeof(float));
+    }
+
+    /* Text labels */
+    if (!r->legend_text_vao) {
+        glGenVertexArrays(1, &r->legend_text_vao);
+        glGenBuffers(1, &r->legend_text_vbo);
+    }
+    glBindVertexArray(r->legend_text_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->legend_text_vbo);
+    glBufferData(GL_ARRAY_BUFFER, text_vert_count * 2 * sizeof(float),
+                 text_verts, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+    r->legend_text_vertex_count = text_vert_count;
 }
 
 void renderer_upload_popup(Renderer *r,
@@ -571,6 +653,13 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glDrawArrays(GL_TRIANGLES, 0, r->night_vertex_count);
     }
 
+    /* Aurora overlay — green heatmap with per-vertex alpha */
+    if (r->aurora_vao && r->aurora_vertex_count > 0) {
+        glUniform4f(r->color_loc, 0.0f, 0.8f, 0.2f, 1.0f);
+        glBindVertexArray(r->aurora_vao);
+        glDrawArrays(GL_TRIANGLES, 0, r->aurora_vertex_count);
+    }
+
     /* Country borders - dim gray */
     if (r->border_vao) {
         glUniform4f(r->color_loc, 0.4f, 0.4f, 0.5f, 1.0f);
@@ -590,6 +679,17 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
             glDrawArrays(GL_LINE_STRIP,
                          r->map_segment_starts[i],
                          r->map_segment_counts[i]);
+        }
+    }
+
+    /* MUF contour lines — per-segment color */
+    if (r->muf_vao && r->muf_num_segments > 0) {
+        glVertexAttrib1f(1, 1.0f);
+        glBindVertexArray(r->muf_vao);
+        for (int i = 0; i < r->muf_num_segments; i++) {
+            glUniform4fv(r->color_loc, 1, r->muf_segment_colors[i]);
+            glDrawArrays(GL_LINE_STRIP, r->muf_segment_starts[i],
+                         r->muf_segment_counts[i]);
         }
     }
 
@@ -694,7 +794,7 @@ void renderer_draw_buttons(const Renderer *r, int fb_w, int fb_h)
     if (r->btn_bg_vao && r->btn_bg_vertex_count > 0) {
         glBindVertexArray(r->btn_bg_vao);
         for (int i = 0; i < r->btn_count && i < 16; i++) {
-            if (i == r->btn_active_quad)
+            if ((r->btn_active_mask & (1u << i)))
                 glUniform4f(r->color_loc, 0.2f, 0.35f, 0.55f, 0.8f);
             else if (i == r->btn_hovered_quad)
                 glUniform4f(r->color_loc, 0.25f, 0.25f, 0.35f, 0.75f);
@@ -708,7 +808,7 @@ void renderer_draw_buttons(const Renderer *r, int fb_w, int fb_h)
     if (r->btn_outline_vao && r->btn_outline_vertex_count > 0) {
         glBindVertexArray(r->btn_outline_vao);
         for (int i = 0; i < r->btn_count && i < 16; i++) {
-            if (i == r->btn_active_quad)
+            if ((r->btn_active_mask & (1u << i)))
                 glUniform4f(r->color_loc, 0.4f, 0.6f, 0.9f, 0.9f);
             else if (i == r->btn_hovered_quad)
                 glUniform4f(r->color_loc, 0.5f, 0.5f, 0.7f, 0.9f);
@@ -723,6 +823,22 @@ void renderer_draw_buttons(const Renderer *r, int fb_w, int fb_h)
         glUniform4f(r->color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
         glBindVertexArray(r->btn_text_vao);
         glDrawArrays(GL_LINES, 0, r->btn_text_vertex_count);
+    }
+
+    /* MUF legend: colored swatches + white text labels */
+    if (r->legend_line_vao && r->legend_line_count > 0) {
+        glLineWidth(3.0f);
+        glBindVertexArray(r->legend_line_vao);
+        for (int i = 0; i < r->legend_line_count; i++) {
+            glUniform4fv(r->color_loc, 1, r->legend_line_colors[i]);
+            glDrawArrays(GL_LINES, r->legend_line_starts[i], 2);
+        }
+        glLineWidth(1.5f);
+    }
+    if (r->legend_text_vao && r->legend_text_vertex_count > 0) {
+        glUniform4f(r->color_loc, 0.85f, 0.85f, 0.95f, 1.0f);
+        glBindVertexArray(r->legend_text_vao);
+        glDrawArrays(GL_LINES, 0, r->legend_text_vertex_count);
     }
 
     /* Popup panel */
@@ -832,6 +948,10 @@ void renderer_destroy(Renderer *r)
     if (r->disc_vao) { glDeleteVertexArrays(1, &r->disc_vao); glDeleteBuffers(1, &r->disc_vbo); }
     if (r->grid_vao) { glDeleteVertexArrays(1, &r->grid_vao); glDeleteBuffers(1, &r->grid_vbo); }
     if (r->night_vao) { glDeleteVertexArrays(1, &r->night_vao); glDeleteBuffers(1, &r->night_vbo); }
+    if (r->aurora_vao) { glDeleteVertexArrays(1, &r->aurora_vao); glDeleteBuffers(1, &r->aurora_vbo); }
+    if (r->muf_vao) { glDeleteVertexArrays(1, &r->muf_vao); glDeleteBuffers(1, &r->muf_vbo); }
+    if (r->legend_line_vao) { glDeleteVertexArrays(1, &r->legend_line_vao); glDeleteBuffers(1, &r->legend_line_vbo); }
+    if (r->legend_text_vao) { glDeleteVertexArrays(1, &r->legend_text_vao); glDeleteBuffers(1, &r->legend_text_vbo); }
     if (r->text_vao) { glDeleteVertexArrays(1, &r->text_vao); glDeleteBuffers(1, &r->text_vbo); }
     if (r->label_vao) { glDeleteVertexArrays(1, &r->label_vao); glDeleteBuffers(1, &r->label_vbo); }
     if (r->label_bg_vao) { glDeleteVertexArrays(1, &r->label_bg_vao); glDeleteBuffers(1, &r->label_bg_vbo); }
