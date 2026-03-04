@@ -32,6 +32,19 @@ make
 
 The binary is placed at `build/azmap`. Shaders are copied to `build/shaders/` automatically.
 
+### Installing (optional)
+
+```bash
+sudo cmake --install build
+```
+
+This installs:
+- `azmap` binary to `<prefix>/bin/`
+- Shaders to `<prefix>/share/azmap/shaders/`
+- Map data (if present) to `<prefix>/share/azmap/data/`
+
+The executable automatically detects whether it's running from the build tree or an installed location and resolves data/shader paths accordingly.
+
 ### Map Data
 
 azMap uses [Natural Earth](https://www.naturalearthdata.com/) 110m shapefiles. Download and extract them so the directory structure looks like:

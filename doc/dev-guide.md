@@ -182,9 +182,24 @@ make
 | libcurl | HTTP requests (QRZ lookup) | `curl` |
 | OpenGL 3.3+ | Rendering | (driver) |
 
+### Installing
+
+```bash
+sudo cmake --install build
+```
+
+Installs the binary to `<prefix>/bin/`, shaders to `<prefix>/share/azmap/shaders/`, and map data (`.shp`, `.shx`, `.dbf`, `.prj` files) to `<prefix>/share/azmap/data/`.
+
 ### Build Output
 
 - `build/azmap` - the executable
 - `build/shaders/` - copied from `shaders/` on every build
 
-The executable resolves data paths relative to its own location (`../data/`, `../shaders/`), so it works both from the build directory and when installed.
+### Path Resolution
+
+The executable resolves data paths relative to its own location using a two-step fallback:
+
+1. **Build tree**: `<exe_dir>/../<rel>` (e.g. `../data/`, `../shaders/`)
+2. **Installed layout**: `<exe_dir>/../share/azmap/<rel>` (e.g. `../share/azmap/data/`)
+
+The first path that exists wins. This allows the same binary to work unmodified in both the build directory and after `cmake --install`.

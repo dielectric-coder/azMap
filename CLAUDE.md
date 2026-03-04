@@ -16,6 +16,9 @@ sudo pacman -S glfw shapelib glew curl
 
 # Build
 mkdir -p build && cd build && cmake .. && make
+
+# Install system-wide (optional)
+sudo cmake --install .
 ```
 
 ## Run

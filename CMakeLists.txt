@@ -68,3 +68,13 @@ add_custom_target(copy_shaders ALL
     COMMENT "Copying shaders to build directory"
 )
 add_dependencies(azmap copy_shaders)
+
+# Install binary and shaders
+include(GNUInstallDirs)
+install(TARGETS azmap RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY shaders/ DESTINATION ${CMAKE_INSTALL_DATADIR}/azmap/shaders)
+install(DIRECTORY data/ DESTINATION ${CMAKE_INSTALL_DATADIR}/azmap/data
+    OPTIONAL
+    FILES_MATCHING
+    PATTERN "*.shp" PATTERN "*.shx" PATTERN "*.dbf" PATTERN "*.prj"
+)

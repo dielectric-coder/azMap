@@ -30,14 +30,23 @@
 #define DEFAULT_LAND_REL "data/ne_110m_land/ne_110m_land.shp"
 #define DEFAULT_SHADER_REL "shaders"
 
-/* Resolve a path relative to the executable's directory. */
+/* Resolve a path relative to the executable's directory.
+ * Tries <exe_dir>/../<rel> first (build tree), then
+ * <exe_dir>/../share/azmap/<rel> (installed layout). */
 static void resolve_path(const char *exe, const char *rel, char *out, size_t out_size)
 {
     char exe_copy[PATH_MAX];
     strncpy(exe_copy, exe, PATH_MAX - 1);
     exe_copy[PATH_MAX - 1] = '\0';
     char *dir = dirname(exe_copy);
+
+    /* Try build-tree layout first */
     snprintf(out, out_size, "%s/../%s", dir, rel);
+    if (access(out, F_OK) == 0)
+        return;
+
+    /* Fall back to installed layout */
+    snprintf(out, out_size, "%s/../share/azmap/%s", dir, rel);
 }
 
 /* Format a coordinate as "12.34N" or "12.34S" / "1.23E" or "1.23W" */
