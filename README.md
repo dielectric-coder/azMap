@@ -30,8 +30,9 @@ sudo pacman -S glfw shapelib glew curl
 # Build
 mkdir -p build && cd build && cmake .. && make
 
-# Install system-wide (optional)
-sudo cmake --install .
+# Install to ~/.local (default prefix)
+cmake --install .
+
 
 # Run: center on Madrid, line to Paris
 ./azmap 40.4168 -3.7038 48.8566 2.3522 -c Madrid -t Paris

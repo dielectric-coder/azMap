@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
+
+# Default to ~/.local install prefix (user-local) unless explicitly overridden
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH "Install prefix" FORCE)
+endif()
+
 project(azmap C)
 
 set(CMAKE_C_STANDARD 11)

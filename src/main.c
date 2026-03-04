@@ -511,15 +511,44 @@ int main(int argc, char **argv)
                     /* Find start of last complete line */
                     char *line = strrchr(fifo_buf, '\n');
                     line = line ? line + 1 : fifo_buf;
-                    /* Parse "lat,lon,name" */
+                    /* Parse "lat,lon,name|station|freq|country|site|lang|target" */
                     double new_lat, new_lon;
                     char new_name[64] = {0};
                     if (sscanf(line, "%lf,%lf,", &new_lat, &new_lon) == 2) {
-                        /* Extract name after second comma */
+                        /* Extract name after second comma (up to first '|') */
                         char *p = strchr(line, ',');
                         if (p) p = strchr(p + 1, ',');
-                        if (p && *(p + 1))
-                            strncpy(new_name, p + 1, sizeof(new_name) - 1);
+                        if (p && *(p + 1)) {
+                            p++; /* skip comma */
+                            char *pipe = strchr(p, '|');
+                            if (pipe) {
+                                size_t nlen = (size_t)(pipe - p);
+                                if (nlen >= sizeof(new_name)) nlen = sizeof(new_name) - 1;
+                                memcpy(new_name, p, nlen);
+                                new_name[nlen] = '\0';
+                                /* Parse station detail fields after first '|' */
+                                const char *labels[] = {"STN", "FREQ", "CTRY", "SITE", "LANG", "TGT"};
+                                char *detail = pipe + 1;
+                                ui.station_info_lines = 0;
+                                for (int fi = 0; fi < 6 && detail; fi++) {
+                                    char *next = strchr(detail, '|');
+                                    size_t flen = next ? (size_t)(next - detail) : strlen(detail);
+                                    if (flen > 0) {
+                                        /* Uppercase the value for stroke font */
+                                        char upper[40] = {0};
+                                        for (size_t ci = 0; ci < flen && ci < sizeof(upper) - 1; ci++)
+                                            upper[ci] = (char)toupper((unsigned char)detail[ci]);
+                                        snprintf(ui.station_info[ui.station_info_lines],
+                                                 sizeof(ui.station_info[0]),
+                                                 "%s: %s", labels[fi], upper);
+                                        ui.station_info_lines++;
+                                    }
+                                    detail = next ? next + 1 : NULL;
+                                }
+                            } else {
+                                strncpy(new_name, p, sizeof(new_name) - 1);
+                            }
+                        }
                         /* Update target */
                         target_lat = new_lat;
                         target_lon = new_lon;
@@ -940,6 +969,18 @@ int main(int argc, char **argv)
                                               (sbw - text_width(ui.popup_result[ri], rsz)) * 0.5f, y,
                                               rsz, sb_verts + svc * 2, 2048 - svc);
                             y += rsz * 1.5f;
+                        }
+                        y += csz * 1.0f;
+                    }
+
+                    /* Station info from swl dashboard */
+                    if (ui.station_info_lines > 0) {
+                        float sisz = 14.0f;
+                        for (int si = 0; si < ui.station_info_lines; si++) {
+                            svc += text_build(ui.station_info[si],
+                                              (sbw - text_width(ui.station_info[si], sisz)) * 0.5f, y,
+                                              sisz, sb_verts + svc * 2, 2048 - svc);
+                            y += sisz * 1.5f;
                         }
                         y += csz * 1.0f;
                     }

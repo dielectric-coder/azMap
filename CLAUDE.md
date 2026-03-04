@@ -17,7 +17,11 @@ sudo pacman -S glfw shapelib glew curl
 # Build
 mkdir -p build && cd build && cmake .. && make
 
-# Install system-wide (optional)
+# Install to ~/.local (default prefix)
+cmake --install .
+
+# Or install system-wide
+cmake -DCMAKE_INSTALL_PREFIX=/usr ..
 sudo cmake --install .
 ```
 

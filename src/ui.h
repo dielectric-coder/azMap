@@ -38,6 +38,10 @@ typedef struct {
     int      sidebar_visible;
     int      sidebar_fb_w;           /* width in framebuffer pixels */
     int      sidebar_qrz_active;    /* QRZ input shown in sidebar */
+
+    /* Station info from swl dashboard (FIFO) */
+    char     station_info[6][48];    /* station, freq, country, site, lang, target */
+    int      station_info_lines;
 } UI;
 
 /* Zero out state. */
