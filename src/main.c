@@ -528,12 +528,12 @@ int main(int argc, char **argv)
                         target_name = target_name_buf;
                         build_label(target_label, sizeof(target_label),
                                     target_name, target_lat, target_lon);
-                        dist = projection_distance(input.center_lat, input.center_lon,
+                        dist = projection_distance(center_lat, center_lon,
                                                    target_lat, target_lon);
-                        az_to = projection_azimuth(input.center_lat, input.center_lon,
+                        az_to = projection_azimuth(center_lat, center_lon,
                                                    target_lat, target_lon);
                         az_from = projection_azimuth(target_lat, target_lon,
-                                                     input.center_lat, input.center_lon);
+                                                     center_lat, center_lon);
                         projection_forward(target_lat, target_lon, &tx, &ty);
                         projection_forward(center_lat, center_lon, &cx, &cy);
                         {
@@ -741,12 +741,19 @@ int main(int argc, char **argv)
                 ui.buttons[btn_spore].visible = 1;
                 ui.buttons[btn_muf].visible = 1;
             } else if (ui.clicked == btn_opt1) {
-                ui_show_popup(&ui, "QRZ LOOKUP");
                 if (!has_qrz) {
+                    ui_show_popup(&ui, "QRZ LOOKUP");
                     strncpy(ui.popup_result[0], "NO QRZ CREDENTIALS", sizeof(ui.popup_result[0]) - 1);
                     strncpy(ui.popup_result[1], "IN CONFIG", sizeof(ui.popup_result[1]) - 1);
                     ui.popup_result_lines = 2;
                     ui.popup_input_active = 0;
+                } else if (ui.sidebar_visible) {
+                    ui.sidebar_qrz_active = 1;
+                    ui_popup_clear_input(&ui);
+                    ui.popup_input_active = 1;
+                    last_text_update = 0;
+                } else {
+                    ui_show_popup(&ui, "QRZ LOOKUP");
                 }
             } else if (ui.clicked == btn_opt2) {
                 ui_show_popup(&ui, "WSJT");
@@ -754,6 +761,10 @@ int main(int argc, char **argv)
                 ui_show_popup(&ui, "BCB");
             } else if (ui.clicked == btn_sidebar) {
                 ui.sidebar_visible = !ui.sidebar_visible;
+                if (!ui.sidebar_visible) {
+                    ui.sidebar_qrz_active = 0;
+                    ui.popup_input_active = 0;
+                }
             } else if (ui.clicked == btn_home) {
                 /* Collapse everything back to home */
                 ui.buttons[btn_proj].visible = 1;
@@ -766,6 +777,8 @@ int main(int argc, char **argv)
                 ui.buttons[btn_spore].visible = 0;
                 ui.buttons[btn_muf].visible = 0;
                 ui_hide_popup(&ui);
+                ui.sidebar_qrz_active = 0;
+                ui.popup_input_active = 0;
             }
             ui.clicked = -1;
         }
@@ -784,13 +797,13 @@ int main(int argc, char **argv)
                 target_name = target_name_buf;
                 build_label(target_label, sizeof(target_label),
                             target_name, target_lat, target_lon);
-                /* Recompute distance/azimuth from current projection center */
-                dist = projection_distance(input.center_lat, input.center_lon,
+                /* Recompute distance/azimuth from original center */
+                dist = projection_distance(center_lat, center_lon,
                                            target_lat, target_lon);
-                az_to = projection_azimuth(input.center_lat, input.center_lon,
+                az_to = projection_azimuth(center_lat, center_lon,
                                            target_lat, target_lon);
                 az_from = projection_azimuth(target_lat, target_lon,
-                                             input.center_lat, input.center_lon);
+                                             center_lat, center_lon);
                 /* Re-project target */
                 projection_forward(target_lat, target_lon, &tx, &ty);
                 projection_forward(center_lat, center_lon, &cx, &cy);
@@ -836,6 +849,8 @@ int main(int argc, char **argv)
                              "GRID: %.10s  %.24s", upper_grid, coord);
                 }
                 ui.popup_result_lines = 4;
+                if (ui.sidebar_qrz_active)
+                    ui.popup_input_active = 0;
             } else {
                 /* Error */
                 char upper_err[64];
@@ -848,6 +863,10 @@ int main(int argc, char **argv)
                 ui.popup_result_lines = 1;
             }
         }
+
+        /* Force text rebuild every frame when sidebar QRZ input is active (cursor blink) */
+        if (ui.sidebar_qrz_active && ui.popup_input_active)
+            last_text_update = 0;
 
         /* Rebuild HUD text every second */
         {
@@ -880,7 +899,7 @@ int main(int argc, char **argv)
                     renderer_upload_text(&renderer, text_verts, 0);
                 }
 
-                /* Sidebar: clocks + distance/azimuth */
+                /* Sidebar: clocks + optional QRZ + distance/azimuth */
                 if (sidebar_fb_w > 0) {
                     float sb_verts[4096];
                     float csz = 18.0f;
@@ -902,6 +921,28 @@ int main(int argc, char **argv)
                                       (sbw - text_width(loc_line, csz)) * 0.5f, y,
                                       csz, sb_verts + svc * 2, 2048 - svc);
                     y += csz * 2.5f;
+
+                    /* QRZ input + results in sidebar */
+                    if (ui.sidebar_qrz_active) {
+                        char call_line[48];
+                        int cursor_on = ui.popup_input_active
+                                        && ((int)(glfwGetTime() * 2.0) % 2);
+                        snprintf(call_line, sizeof(call_line), "CALL: %s%s",
+                                 ui.popup_input, cursor_on ? "_" : "");
+                        svc += text_build(call_line,
+                                          (sbw - text_width(call_line, csz)) * 0.5f, y,
+                                          csz, sb_verts + svc * 2, 2048 - svc);
+                        y += csz * 1.5f;
+
+                        float rsz = 14.0f;
+                        for (int ri = 0; ri < ui.popup_result_lines; ri++) {
+                            svc += text_build(ui.popup_result[ri],
+                                              (sbw - text_width(ui.popup_result[ri], rsz)) * 0.5f, y,
+                                              rsz, sb_verts + svc * 2, 2048 - svc);
+                            y += rsz * 1.5f;
+                        }
+                        y += csz * 1.0f;
+                    }
 
                     char dist_line[64], azto_line[64], azfr_line[64];
                     snprintf(dist_line, sizeof(dist_line), "DIST  %.1f KM", dist);

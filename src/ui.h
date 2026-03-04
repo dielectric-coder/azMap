@@ -37,6 +37,7 @@ typedef struct {
     /* Sidebar panel */
     int      sidebar_visible;
     int      sidebar_fb_w;           /* width in framebuffer pixels */
+    int      sidebar_qrz_active;    /* QRZ input shown in sidebar */
 } UI;
 
 /* Zero out state. */

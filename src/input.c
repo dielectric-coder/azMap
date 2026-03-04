@@ -18,7 +18,7 @@ static void char_callback(GLFWwindow *window, unsigned int codepoint)
     (void)window;
     if (!g_input || !g_input->ui) return;
     UI *u = g_input->ui;
-    if (!u->popup.visible || !u->popup_input_active) return;
+    if (!(u->popup.visible || u->sidebar_qrz_active) || !u->popup_input_active) return;
 
     char ch = (char)toupper((unsigned char)codepoint);
     /* Accept A-Z, 0-9, / */
@@ -36,8 +36,9 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     (void)mods;
     if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
 
-    /* When popup input is active, handle text editing keys and suppress others */
-    if (g_input->ui && g_input->ui->popup.visible && g_input->ui->popup_input_active) {
+    /* When popup/sidebar input is active, handle text editing keys and suppress others */
+    if (g_input->ui && (g_input->ui->popup.visible || g_input->ui->sidebar_qrz_active)
+        && g_input->ui->popup_input_active) {
         UI *u = g_input->ui;
         if (key == GLFW_KEY_BACKSPACE) {
             if (u->popup_input_len > 0) {
@@ -48,7 +49,12 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
                 u->popup_submitted = 1;
             }
         } else if (key == GLFW_KEY_ESCAPE) {
-            ui_hide_popup(u);
+            if (u->sidebar_qrz_active) {
+                u->sidebar_qrz_active = 0;
+                u->popup_input_active = 0;
+            } else {
+                ui_hide_popup(u);
+            }
         }
         return; /* suppress all other keys */
     }

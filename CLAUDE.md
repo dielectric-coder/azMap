@@ -112,8 +112,10 @@ shaders/
 
 **Text rendering**: Uses a built-in vector stroke font (`text.c`) — characters are defined as line segments, rendered with GL_LINES using the same shader. No external font dependencies.
 
-**HUD text**: The top-center overlay shows distance/azimuth info and live local/UTC clocks (using reentrant `gmtime_r`/`localtime_r`), rebuilt every second in the main loop.
+**HUD text**: The top-center overlay shows distance/azimuth info and live local/UTC clocks (using reentrant `gmtime_r`/`localtime_r`), rebuilt every second in the main loop. Distance and azimuth are always computed from the original center coordinates (CLI args or config), not from the panned view center (`input.center_lat/lon`). This ensures consistent readings regardless of map panning.
 
 **Labels**: Location labels are rebuilt each frame by projecting marker km-positions through the MVP to screen coordinates, then rendered in pixel-space. The center label is cyan and the target label is orange.
 
 **UI popup**: The `UIPopup` struct stores position offset (`offset_x`, `offset_y`) for drag support. The popup is centered on show (`ui_show_popup()` resets offsets) and can be dragged by its title bar. `input.c` detects title-bar presses via hit-testing the top 30px of the popup bounds, then accumulates cursor deltas into the offset during drag. The `popup_dragging` flag in `InputState` distinguishes popup drags from map pans. Clicks outside the popup pass through to button hit-testing; clicks inside are consumed.
+
+**Sidebar QRZ**: When the sidebar is visible, clicking the QRZ button activates inline callsign input in the sidebar (`sidebar_qrz_active`) instead of opening a popup. The input field shows a blinking cursor and accepts the same A-Z/0-9/slash input as the popup. Results display directly below the input in the sidebar. Pressing Escape dismisses the sidebar QRZ input without closing the sidebar. Closing the sidebar or pressing Home also clears the QRZ input state.
