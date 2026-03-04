@@ -110,6 +110,18 @@ typedef struct {
 
 **`Camera`** (`camera.h`) - orthographic view state: `zoom_km`, `pan_x`, `pan_y`, `aspect`.
 
+### Main Loop Helpers (`main.c`)
+
+Several static helper functions in `main.c` reduce duplication in the main loop:
+
+- **`str_upper(dst, dst_sz, src)`** — uppercase a string into a destination buffer (null-terminated)
+- **`parse_station_detail(ui, detail_str)`** — parse pipe-delimited detail string (`station|freq|country|site|lang|target`) into `ui->station_info[]` with label prefixes (STN, FREQ, CTRY, SITE, LANG, TGT)
+- **`reproject_all(map, borders, has_borders, land, has_land, renderer)`** — reproject and re-upload all map geometry (coastlines, borders, land) after a projection center or mode change
+- **`update_target_geometry(..., recompute_dist)`** — recompute distance/azimuth (if `recompute_dist`), forward-project center and target, and rebuild the great-circle line. Called from FIFO handler, QRZ success, center-dirty, and projection toggle
+- **`clear_target_state(ui, dist, az_to, az_from, renderer, last_text_update)`** — clear station info, zero distance/azimuth, remove target line, hide popup, and force HUD rebuild. Used by QRZ, WSJT, and BCB button handlers
+
+Named constants at the top of `main.c`: `SIDEBAR_WIDTH_PX` (300), `MARKER_ZOOM_FACTOR` (0.005), `BUTTON_HEIGHT` (28), `NIGHT_UPDATE_SEC` (60).
+
 ### Grid System
 
 The grid (`grid.c`) provides two generation modes matching the projection:

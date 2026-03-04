@@ -28,6 +28,10 @@
 
 #define DEFAULT_WIDTH  800
 #define DEFAULT_HEIGHT 800
+#define SIDEBAR_WIDTH_PX 300.0f
+#define MARKER_ZOOM_FACTOR 0.005f
+#define BUTTON_HEIGHT 28.0f
+#define NIGHT_UPDATE_SEC 60
 #define DEFAULT_SHP_REL "data/ne_110m_coastline/ne_110m_coastline.shp"
 #define DEFAULT_BORDER_REL "data/ne_110m_admin_0_boundary_lines_land/ne_110m_admin_0_boundary_lines_land.shp"
 #define DEFAULT_LAND_REL "data/ne_110m_land/ne_110m_land.shp"
@@ -154,6 +158,87 @@ static int build_gc_line(double lat1, double lon1, double lat2, double lon2,
     return n + 1;
 }
 
+/* Uppercase a string into dst (always null-terminated). */
+static void str_upper(char *dst, size_t dst_sz, const char *src)
+{
+    size_t i;
+    for (i = 0; i < dst_sz - 1 && src[i]; i++)
+        dst[i] = (char)toupper((unsigned char)src[i]);
+    dst[i] = '\0';
+}
+
+/* Clear station info, target line, distance/azimuth, and popup state. */
+static void clear_target_state(UI *ui, double *dist, double *az_to, double *az_from,
+                               Renderer *renderer, time_t *last_text_update)
+{
+    ui->station_info_lines = 0;
+    *dist = 0; *az_to = 0; *az_from = 0;
+    renderer_upload_target_line(renderer, NULL, 0);
+    ui_hide_popup(ui);
+    ui_popup_clear_input(ui);
+    *last_text_update = 0;
+}
+
+/* Reproject all map geometry after projection center or mode change. */
+static void reproject_all(MapData *map, MapData *borders, int has_borders,
+                          MapData *land, int has_land, Renderer *renderer)
+{
+    map_data_reproject(map);
+    renderer_upload_map(renderer, map);
+    if (has_borders) {
+        map_data_reproject(borders);
+        renderer_upload_borders(renderer, borders);
+    }
+    if (has_land) {
+        map_data_reproject_nosplit(land);
+        renderer_upload_land(renderer, land);
+    }
+}
+
+/* Recompute distance/azimuth and rebuild target geometry (gc line + projections).
+ * Pass recompute_dist=1 when target changed, 0 when only projection/center changed. */
+static void update_target_geometry(double center_lat, double center_lon,
+                                   double target_lat, double target_lon,
+                                   double *dist, double *az_to, double *az_from,
+                                   double *cx, double *cy, double *tx, double *ty,
+                                   Renderer *renderer, int recompute_dist)
+{
+    if (recompute_dist) {
+        *dist = projection_distance(center_lat, center_lon, target_lat, target_lon);
+        *az_to = projection_azimuth(center_lat, center_lon, target_lat, target_lon);
+        *az_from = projection_azimuth(target_lat, target_lon, center_lat, center_lon);
+    }
+    projection_forward(center_lat, center_lon, cx, cy);
+    projection_forward(target_lat, target_lon, tx, ty);
+    float gc_verts[GC_LINE_POINTS * 2];
+    int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
+    renderer_upload_target_line(renderer, gc_verts, gc_n);
+}
+
+/* Parse pipe-delimited detail string into ui->station_info[]. */
+static void parse_station_detail(UI *ui, const char *detail_str)
+{
+    static const char *labels[] = {"STN", "FREQ", "CTRY", "SITE", "LANG", "TGT"};
+    char dbuf[256];
+    strncpy(dbuf, detail_str, sizeof(dbuf) - 1);
+    dbuf[sizeof(dbuf) - 1] = '\0';
+    char *field = dbuf;
+    ui->station_info_lines = 0;
+    for (int i = 0; i < 6 && field; i++) {
+        char *next = strchr(field, '|');
+        if (next) *next = '\0';
+        if (*field) {
+            char upper[40];
+            str_upper(upper, sizeof(upper), field);
+            snprintf(ui->station_info[ui->station_info_lines],
+                     sizeof(ui->station_info[0]),
+                     "%s: %s", labels[i], upper);
+            ui->station_info_lines++;
+        }
+        field = next ? next + 1 : NULL;
+    }
+}
+
 static void print_usage(const char *prog)
 {
     fprintf(stderr,
@@ -245,25 +330,25 @@ int main(int argc, char **argv)
 
     /* Parse optional flags */
     const char *detail_arg = NULL;
-    int i = opt_start;
-    while (i < argc) {
-        if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
-            center_name = argv[++i];
-        } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
-            target_name = argv[++i];
-        } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
-            detail_arg = argv[++i];
-        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
-            shp_override = argv[++i];
-        } else if (argv[i][0] != '-' && !shp_override) {
+    int argi = opt_start;
+    while (argi < argc) {
+        if (strcmp(argv[argi], "-c") == 0 && argi + 1 < argc) {
+            center_name = argv[++argi];
+        } else if (strcmp(argv[argi], "-t") == 0 && argi + 1 < argc) {
+            target_name = argv[++argi];
+        } else if (strcmp(argv[argi], "-d") == 0 && argi + 1 < argc) {
+            detail_arg = argv[++argi];
+        } else if (strcmp(argv[argi], "-s") == 0 && argi + 1 < argc) {
+            shp_override = argv[++argi];
+        } else if (argv[argi][0] != '-' && !shp_override) {
             /* Backward compat: bare arg = shapefile path */
-            shp_override = argv[i];
+            shp_override = argv[argi];
         } else {
-            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            fprintf(stderr, "Unknown option: %s\n", argv[argi]);
             print_usage(argv[0]);
             return 1;
         }
-        i++;
+        argi++;
     }
 
     /* Resolve default paths relative to executable location */
@@ -433,29 +518,8 @@ int main(int argc, char **argv)
     ui.sidebar_visible = 1;
 
     /* Parse -d detail string: "station|freq|country|site|lang|target" */
-    if (detail_arg) {
-        const char *labels[] = {"STN", "FREQ", "CTRY", "SITE", "LANG", "TGT"};
-        char dbuf[256];
-        strncpy(dbuf, detail_arg, sizeof(dbuf) - 1);
-        dbuf[sizeof(dbuf) - 1] = '\0';
-        char *detail = dbuf;
-        ui.station_info_lines = 0;
-        for (int di = 0; di < 6 && detail; di++) {
-            char *next = strchr(detail, '|');
-            if (next) *next = '\0';
-            size_t flen = strlen(detail);
-            if (flen > 0) {
-                char upper[40] = {0};
-                for (size_t ci = 0; ci < flen && ci < sizeof(upper) - 1; ci++)
-                    upper[ci] = (char)toupper((unsigned char)detail[ci]);
-                snprintf(ui.station_info[ui.station_info_lines],
-                         sizeof(ui.station_info[0]),
-                         "%s: %s", labels[di], upper);
-                ui.station_info_lines++;
-            }
-            detail = next ? next + 1 : NULL;
-        }
-    }
+    if (detail_arg)
+        parse_station_detail(&ui, detail_arg);
     int btn_home    = ui_add_button(&ui, "Home",   0, 0, 80, 28);
     int btn_proj    = ui_add_button(&ui, "Proj",   0, 0, 80, 28);
     /* Sidebar buttons — layers row */
@@ -547,24 +611,7 @@ int main(int argc, char **argv)
                                 memcpy(new_name, p, nlen);
                                 new_name[nlen] = '\0';
                                 /* Parse station detail fields after first '|' */
-                                const char *labels[] = {"STN", "FREQ", "CTRY", "SITE", "LANG", "TGT"};
-                                char *detail = pipe + 1;
-                                ui.station_info_lines = 0;
-                                for (int fi = 0; fi < 6 && detail; fi++) {
-                                    char *next = strchr(detail, '|');
-                                    size_t flen = next ? (size_t)(next - detail) : strlen(detail);
-                                    if (flen > 0) {
-                                        /* Uppercase the value for stroke font */
-                                        char upper[40] = {0};
-                                        for (size_t ci = 0; ci < flen && ci < sizeof(upper) - 1; ci++)
-                                            upper[ci] = (char)toupper((unsigned char)detail[ci]);
-                                        snprintf(ui.station_info[ui.station_info_lines],
-                                                 sizeof(ui.station_info[0]),
-                                                 "%s: %s", labels[fi], upper);
-                                        ui.station_info_lines++;
-                                    }
-                                    detail = next ? next + 1 : NULL;
-                                }
+                                parse_station_detail(&ui, pipe + 1);
                             } else {
                                 strncpy(new_name, p, sizeof(new_name) - 1);
                             }
@@ -577,20 +624,11 @@ int main(int argc, char **argv)
                         target_name = target_name_buf;
                         build_label(target_label, sizeof(target_label),
                                     target_name, target_lat, target_lon);
-                        dist = projection_distance(center_lat, center_lon,
-                                                   target_lat, target_lon);
-                        az_to = projection_azimuth(center_lat, center_lon,
-                                                   target_lat, target_lon);
-                        az_from = projection_azimuth(target_lat, target_lon,
-                                                     center_lat, center_lon);
-                        projection_forward(target_lat, target_lon, &tx, &ty);
-                        projection_forward(center_lat, center_lon, &cx, &cy);
-                        {
-                            float gc_verts[GC_LINE_POINTS * 2];
-                            int gc_n = build_gc_line(center_lat, center_lon,
-                                                     target_lat, target_lon, gc_verts);
-                            renderer_upload_target_line(&renderer, gc_verts, gc_n);
-                        }
+                        update_target_geometry(center_lat, center_lon,
+                                               target_lat, target_lon,
+                                               &dist, &az_to, &az_from,
+                                               &cx, &cy, &tx, &ty,
+                                               &renderer, 1);
                         last_text_update = 0; /* force HUD refresh */
                     }
                     /* Discard processed data */
@@ -603,23 +641,12 @@ int main(int argc, char **argv)
         if (input.center_dirty) {
             input.center_dirty = 0;
             projection_set_center(input.center_lat, input.center_lon);
-            map_data_reproject(&map);
-            renderer_upload_map(&renderer, &map);
-            if (has_borders) {
-                map_data_reproject(&borders);
-                renderer_upload_borders(&renderer, &borders);
-            }
-            if (has_land) {
-                map_data_reproject_nosplit(&land);
-                renderer_upload_land(&renderer, &land);
-            }
-            projection_forward(center_lat, center_lon, &cx, &cy);
-            projection_forward(target_lat, target_lon, &tx, &ty);
-            {
-                float gc_verts[GC_LINE_POINTS * 2];
-                int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
-                renderer_upload_target_line(&renderer, gc_verts, gc_n);
-            }
+            reproject_all(&map, &borders, has_borders, &land, has_land, &renderer);
+            update_target_geometry(center_lat, center_lon,
+                                   target_lat, target_lon,
+                                   &dist, &az_to, &az_from,
+                                   &cx, &cy, &tx, &ty,
+                                   &renderer, 0);
             projection_forward(90.0, 0.0, &npx, &npy);
             /* In ortho mode, grid depends on projection center */
             if (projection_get_mode() == PROJ_ORTHO) {
@@ -630,7 +657,7 @@ int main(int argc, char **argv)
         }
 
         /* Update marker size relative to zoom */
-        float ms = cam.zoom_km * 0.005f;
+        float ms = cam.zoom_km * MARKER_ZOOM_FACTOR;
         if (dist > 0.0)
             renderer_upload_markers(&renderer, (float)cx, (float)cy, (float)tx, (float)ty, ms);
         else
@@ -642,7 +669,7 @@ int main(int argc, char **argv)
         /* Compute sidebar and map area widths */
         int sidebar_fb_w = 0;
         if (ui.sidebar_visible) {
-            sidebar_fb_w = (int)(300.0f * input.cursor_scale_x);
+            sidebar_fb_w = (int)(SIDEBAR_WIDTH_PX * input.cursor_scale_x);
             if (sidebar_fb_w > fb_w / 2) sidebar_fb_w = fb_w / 2;
         }
         ui.sidebar_fb_w = sidebar_fb_w;
@@ -688,7 +715,7 @@ int main(int argc, char **argv)
 
         /* Update button positions */
         {
-            float bh = 28.0f, gap = 10.0f, margin = 10.0f;
+            float bh = BUTTON_HEIGHT, margin = 10.0f;
 
             /* Proj button: upper-left corner of map */
             ui.buttons[btn_proj].x = margin;
@@ -843,25 +870,13 @@ int main(int argc, char **argv)
                 ProjMode cur = projection_get_mode();
                 ProjMode nxt = (cur == PROJ_AZEQ) ? PROJ_ORTHO : PROJ_AZEQ;
                 projection_set_mode(nxt);
-                /* Reproject all map geometry */
-                map_data_reproject(&map);
-                renderer_upload_map(&renderer, &map);
-                if (has_borders) {
-                    map_data_reproject(&borders);
-                    renderer_upload_borders(&renderer, &borders);
-                }
-                if (has_land) {
-                    map_data_reproject_nosplit(&land);
-                    renderer_upload_land(&renderer, &land);
-                }
+                reproject_all(&map, &borders, has_borders, &land, has_land, &renderer);
                 /* Re-project key points */
-                projection_forward(center_lat, center_lon, &cx, &cy);
-                projection_forward(target_lat, target_lon, &tx, &ty);
-                {
-                    float gc_verts[GC_LINE_POINTS * 2];
-                    int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
-                    renderer_upload_target_line(&renderer, gc_verts, gc_n);
-                }
+                update_target_geometry(center_lat, center_lon,
+                                       target_lat, target_lon,
+                                       &dist, &az_to, &az_from,
+                                       &cx, &cy, &tx, &ty,
+                                       &renderer, 0);
                 projection_forward(90.0, 0.0, &npx, &npy);
                 /* Rebuild grid for new mode */
                 if (nxt == PROJ_ORTHO)
@@ -878,11 +893,9 @@ int main(int argc, char **argv)
                 if (cam.zoom_km > (float)max_diam)
                     cam.zoom_km = (float)max_diam;
             } else if (ui.clicked == btn_opt1) {
-                /* QRZ: use popup for callsign entry, clear info */
-                ui.station_info_lines = 0;
-                dist = 0; az_to = 0; az_from = 0;
-                renderer_upload_target_line(&renderer, NULL, 0);
-                ui_hide_popup(&ui);
+                /* QRZ: clear info, open callsign lookup popup */
+                clear_target_state(&ui, &dist, &az_to, &az_from,
+                                   &renderer, &last_text_update);
                 if (!has_qrz) {
                     ui_show_popup(&ui, "QRZ LOOKUP");
                     strncpy(ui.popup_result[0], "NO QRZ CREDENTIALS", sizeof(ui.popup_result[0]) - 1);
@@ -892,24 +905,15 @@ int main(int argc, char **argv)
                 } else {
                     ui_show_popup(&ui, "QRZ LOOKUP");
                 }
-                last_text_update = 0;
             } else if (ui.clicked == btn_opt2) {
                 /* WSJT: clear info, show popup */
-                ui.station_info_lines = 0;
-                dist = 0; az_to = 0; az_from = 0;
-                renderer_upload_target_line(&renderer, NULL, 0);
-                ui_hide_popup(&ui);
-                ui_popup_clear_input(&ui);
-                last_text_update = 0;
+                clear_target_state(&ui, &dist, &az_to, &az_from,
+                                   &renderer, &last_text_update);
                 ui_show_popup(&ui, "WSJT");
             } else if (ui.clicked == btn_opt3) {
                 /* BCB: just clear info */
-                ui.station_info_lines = 0;
-                dist = 0; az_to = 0; az_from = 0;
-                renderer_upload_target_line(&renderer, NULL, 0);
-                ui_hide_popup(&ui);
-                ui_popup_clear_input(&ui);
-                last_text_update = 0;
+                clear_target_state(&ui, &dist, &az_to, &az_from,
+                                   &renderer, &last_text_update);
             } else if (ui.clicked == btn_home) {
                 ui_hide_popup(&ui);
             }
@@ -930,21 +934,11 @@ int main(int argc, char **argv)
                 target_name = target_name_buf;
                 build_label(target_label, sizeof(target_label),
                             target_name, target_lat, target_lon);
-                /* Recompute distance/azimuth from original center */
-                dist = projection_distance(center_lat, center_lon,
-                                           target_lat, target_lon);
-                az_to = projection_azimuth(center_lat, center_lon,
-                                           target_lat, target_lon);
-                az_from = projection_azimuth(target_lat, target_lon,
-                                             center_lat, center_lon);
-                /* Re-project target */
-                projection_forward(target_lat, target_lon, &tx, &ty);
-                projection_forward(center_lat, center_lon, &cx, &cy);
-                {
-                    float gc_verts[GC_LINE_POINTS * 2];
-                    int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
-                    renderer_upload_target_line(&renderer, gc_verts, gc_n);
-                }
+                update_target_geometry(center_lat, center_lon,
+                                       target_lat, target_lon,
+                                       &dist, &az_to, &az_from,
+                                       &cx, &cy, &tx, &ty,
+                                       &renderer, 1);
                 /* Close popup and show results in sidebar */
                 ui_hide_popup(&ui);
                 last_text_update = 0;
@@ -954,39 +948,25 @@ int main(int argc, char **argv)
                 snprintf(ui.station_info[ui.station_info_lines++],
                          sizeof(ui.station_info[0]), "CALL: %s", qrz_result.call);
                 {
-                    char upper_name[40] = {0};
-                    for (int ci = 0; qrz_result.name[ci] && ci < 39; ci++)
-                        upper_name[ci] = (char)toupper((unsigned char)qrz_result.name[ci]);
+                    char upper[40];
+                    str_upper(upper, sizeof(upper), qrz_result.name);
                     snprintf(ui.station_info[ui.station_info_lines++],
-                             sizeof(ui.station_info[0]), "NAME: %s", upper_name);
-                }
-                {
-                    char upper_loc[40] = {0};
-                    for (int ci = 0; qrz_result.location[ci] && ci < 39; ci++)
-                        upper_loc[ci] = (char)toupper((unsigned char)qrz_result.location[ci]);
+                             sizeof(ui.station_info[0]), "NAME: %s", upper);
+                    str_upper(upper, sizeof(upper), qrz_result.location);
                     snprintf(ui.station_info[ui.station_info_lines++],
-                             sizeof(ui.station_info[0]), "LOC: %s", upper_loc);
-                }
-                {
-                    char coord[64];
-                    format_coord(coord, sizeof(coord), qrz_result.lat, qrz_result.lon);
-                    char upper_grid[16] = {0};
-                    for (int ci = 0; qrz_result.grid[ci] && ci < 15; ci++)
-                        upper_grid[ci] = (char)toupper((unsigned char)qrz_result.grid[ci]);
+                             sizeof(ui.station_info[0]), "LOC: %s", upper);
+                    char upper_grid[16];
+                    str_upper(upper_grid, sizeof(upper_grid), qrz_result.grid);
                     snprintf(ui.station_info[ui.station_info_lines++],
                              sizeof(ui.station_info[0]), "GRID: %s", upper_grid);
+                    char coord[64];
+                    format_coord(coord, sizeof(coord), qrz_result.lat, qrz_result.lon);
                     snprintf(ui.station_info[ui.station_info_lines++],
                              sizeof(ui.station_info[0]), "%.47s", coord);
                 }
             } else {
                 /* Error */
-                char upper_err[64];
-                int ei = 0;
-                for (int ci = 0; err_buf[ci] && ei < 63; ci++)
-                    upper_err[ei++] = (char)toupper((unsigned char)err_buf[ci]);
-                upper_err[ei] = '\0';
-                strncpy(ui.popup_result[0], upper_err,
-                        sizeof(ui.popup_result[0]) - 1);
+                str_upper(ui.popup_result[0], sizeof(ui.popup_result[0]), err_buf);
                 ui.popup_result_lines = 1;
             }
         }
@@ -1087,7 +1067,7 @@ int main(int argc, char **argv)
         /* Update night overlay periodically */
         {
             time_t now = time(NULL);
-            if (now - last_sun_update >= 60) {
+            if (now - last_sun_update >= NIGHT_UPDATE_SEC) {
                 last_sun_update = now;
                 SubsolarPoint sun = solar_subsolar_point(now);
                 nightmesh_build(&nightmesh, &sun);
