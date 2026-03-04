@@ -63,6 +63,12 @@ int renderer_init(Renderer *r, const char *shader_dir)
     free(vert_src);
     free(frag_src);
 
+    if (!vs || !fs) {
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        return -1;
+    }
+
     r->program = glCreateProgram();
     glAttachShader(r->program, vs);
     glAttachShader(r->program, fs);
@@ -77,6 +83,8 @@ int renderer_init(Renderer *r, const char *shader_dir)
         char log[512];
         glGetProgramInfoLog(r->program, sizeof(log), NULL, log);
         fprintf(stderr, "Program link error: %s\n", log);
+        glDeleteProgram(r->program);
+        r->program = 0;
         return -1;
     }
 

@@ -507,7 +507,7 @@ int main(int argc, char **argv)
     mkfifo(FIFO_PATH, 0666); /* no-op if already exists */
     int fifo_fd = open(FIFO_PATH, O_RDWR | O_NONBLOCK);
     /* O_RDWR keeps fd alive even when writer closes */
-    char fifo_buf[256];
+    char fifo_buf[512];
     int fifo_buf_len = 0;
 
     /* Main loop */
@@ -523,7 +523,10 @@ int main(int argc, char **argv)
                 fifo_buf[fifo_buf_len] = '\0';
                 /* Process last complete line (delimited by newline) */
                 char *last_nl = strrchr(fifo_buf, '\n');
-                if (last_nl) {
+                if (!last_nl && fifo_buf_len >= (int)sizeof(fifo_buf) - 2) {
+                    /* Buffer full with no newline — discard to avoid stall */
+                    fifo_buf_len = 0;
+                } else if (last_nl) {
                     *last_nl = '\0';
                     /* Find start of last complete line */
                     char *line = strrchr(fifo_buf, '\n');
@@ -819,7 +822,7 @@ int main(int argc, char **argv)
         /* Build and upload popup geometry */
         if (ui.popup.visible) {
             float popup_quads[5 * 12]; /* up to 5 quads * 6 verts * 2 floats */
-            float popup_text[4096];
+            float popup_text[8192];
             int pq_count, pt_count;
             ui_build_popup_geometry(&ui, map_fb_w, fb_h,
                                     popup_quads, &pq_count,
