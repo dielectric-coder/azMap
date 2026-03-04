@@ -60,7 +60,10 @@ Drawn back to front in `renderer_draw()`:
 | 10 | Target marker | Red (1.0, 0.3, 0.2) | GL_LINE_LOOP |
 | 11 | North pole triangle | White (1.0, 1.0, 1.0) | GL_TRIANGLES |
 | 12 | Location labels | Cyan / Orange | GL_LINES (pixel-space) |
-| 13 | UI buttons | Variable | GL_TRIANGLES + GL_LINES (pixel-space) |
+| 13 | UI button fills (rounded rects) | Variable | GL_TRIANGLES (pixel-space) |
+| 13b | UI button outlines | Variable | GL_LINES (pixel-space) |
+| 13c | UI button text | White | GL_LINES (pixel-space) |
+| 13d | Section labels + dividers | White | GL_LINES (pixel-space) |
 | 14 | Popup panel | Variable | GL_TRIANGLES + GL_LINES (pixel-space) |
 | 15 | HUD text (dist/az) | White (1.0, 1.0, 1.0) | GL_LINES (pixel-space) |
 

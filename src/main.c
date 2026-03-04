@@ -244,12 +244,15 @@ int main(int argc, char **argv)
     }
 
     /* Parse optional flags */
+    const char *detail_arg = NULL;
     int i = opt_start;
     while (i < argc) {
         if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
             center_name = argv[++i];
         } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
             target_name = argv[++i];
+        } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
+            detail_arg = argv[++i];
         } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
             shp_override = argv[++i];
         } else if (argv[i][0] != '-' && !shp_override) {
@@ -427,28 +430,42 @@ int main(int argc, char **argv)
     /* UI buttons */
     UI ui;
     ui_init(&ui);
-    if (cfg.panel_visible)
-        ui.sidebar_visible = 1;
-    int btn_home    = ui_add_button(&ui, "Home",   0, 0, 90, 30);
-    int btn_proj    = ui_add_button(&ui, "Proj",   0, 0, 90, 30);
-    int btn_mode    = ui_add_button(&ui, "Mode",   0, 0, 90, 30);
-    int btn_layers  = ui_add_button(&ui, "Layers", 0, 0, 90, 30);
-    int btn_sidebar = ui_add_button(&ui, "Panel",  0, 0, 90, 30);
-    /* Mode sub-buttons */
-    int btn_opt1 = ui_add_button(&ui, "QRZ",  0, 0, 90, 30);
-    int btn_opt2 = ui_add_button(&ui, "WSJT", 0, 0, 90, 30);
-    int btn_opt3 = ui_add_button(&ui, "BCB",  0, 0, 90, 30);
-    /* Layers sub-buttons */
-    int btn_aurora = ui_add_button(&ui, "Aurora",  0, 0, 110, 30);
-    int btn_spore  = ui_add_button(&ui, "Spor. E", 0, 0, 110, 30);
-    int btn_muf    = ui_add_button(&ui, "MUF",     0, 0, 110, 30);
-    /* Start in home mode */
-    ui.buttons[btn_opt1].visible = 0;
-    ui.buttons[btn_opt2].visible = 0;
-    ui.buttons[btn_opt3].visible = 0;
-    ui.buttons[btn_aurora].visible = 0;
-    ui.buttons[btn_spore].visible = 0;
-    ui.buttons[btn_muf].visible = 0;
+    ui.sidebar_visible = 1;
+
+    /* Parse -d detail string: "station|freq|country|site|lang|target" */
+    if (detail_arg) {
+        const char *labels[] = {"STN", "FREQ", "CTRY", "SITE", "LANG", "TGT"};
+        char dbuf[256];
+        strncpy(dbuf, detail_arg, sizeof(dbuf) - 1);
+        dbuf[sizeof(dbuf) - 1] = '\0';
+        char *detail = dbuf;
+        ui.station_info_lines = 0;
+        for (int di = 0; di < 6 && detail; di++) {
+            char *next = strchr(detail, '|');
+            if (next) *next = '\0';
+            size_t flen = strlen(detail);
+            if (flen > 0) {
+                char upper[40] = {0};
+                for (size_t ci = 0; ci < flen && ci < sizeof(upper) - 1; ci++)
+                    upper[ci] = (char)toupper((unsigned char)detail[ci]);
+                snprintf(ui.station_info[ui.station_info_lines],
+                         sizeof(ui.station_info[0]),
+                         "%s: %s", labels[di], upper);
+                ui.station_info_lines++;
+            }
+            detail = next ? next + 1 : NULL;
+        }
+    }
+    int btn_home    = ui_add_button(&ui, "Home",   0, 0, 80, 28);
+    int btn_proj    = ui_add_button(&ui, "Proj",   0, 0, 80, 28);
+    /* Sidebar buttons — layers row */
+    int btn_aurora = ui_add_button(&ui, "Aurora",  0, 0, 80, 28);
+    int btn_spore  = ui_add_button(&ui, "Spor.E",  0, 0, 80, 28);
+    int btn_muf    = ui_add_button(&ui, "MUF",     0, 0, 80, 28);
+    /* Sidebar buttons — mode row */
+    int btn_opt1 = ui_add_button(&ui, "QRZ",  0, 0, 80, 28);
+    int btn_opt2 = ui_add_button(&ui, "WSJT", 0, 0, 80, 28);
+    int btn_opt3 = ui_add_button(&ui, "BCB",  0, 0, 80, 28);
 
     /* Camera — use actual framebuffer size (differs from window size on HiDPI) */
     Camera cam;
@@ -611,7 +628,10 @@ int main(int argc, char **argv)
 
         /* Update marker size relative to zoom */
         float ms = cam.zoom_km * 0.005f;
-        renderer_upload_markers(&renderer, (float)cx, (float)cy, (float)tx, (float)ty, ms);
+        if (dist > 0.0)
+            renderer_upload_markers(&renderer, (float)cx, (float)cy, (float)tx, (float)ty, ms);
+        else
+            renderer_upload_markers(&renderer, (float)cx, (float)cy, (float)cx, (float)cy, 0.0f);
         renderer_upload_npole(&renderer, (float)npx, (float)npy, ms);
 
         glfwGetFramebufferSize(window, &fb_w, &fb_h);
@@ -643,12 +663,16 @@ int main(int argc, char **argv)
         float cly = cpy - label_size * 1.8f;
         int center_vcount = text_build(center_label, clx, cly,
             label_size, label_verts, 4096);
-        /* Target label: offset below target crosshair */
-        float tw = text_width(target_label, label_size);
-        float tlx = tpx - tw * 0.5f;
-        float tly = tpy + label_size * 0.8f;
-        int target_vcount = text_build(target_label, tlx, tly,
-            label_size, label_verts + center_vcount * 2, 4096 - center_vcount);
+        /* Target label: offset below target crosshair (only if target active) */
+        int target_vcount = 0;
+        float tw = 0, tlx = 0, tly = 0;
+        if (dist > 0.0) {
+            tw = text_width(target_label, label_size);
+            tlx = tpx - tw * 0.5f;
+            tly = tpy + label_size * 0.8f;
+            target_vcount = text_build(target_label, tlx, tly,
+                label_size, label_verts + center_vcount * 2, 4096 - center_vcount);
+        }
 
         renderer_upload_labels(&renderer, label_verts, center_vcount + target_vcount, center_vcount);
 
@@ -656,43 +680,140 @@ int main(int argc, char **argv)
         float bg_verts[24]; /* 2 quads * 6 verts * 2 floats */
         float pad = 4.0f;
         int cbg = build_label_bg(clx, cly, cw, label_size, pad, bg_verts);
-        int tbg = build_label_bg(tlx, tly, tw, label_size, pad, bg_verts + cbg * 2);
+        int tbg = (dist > 0.0) ? build_label_bg(tlx, tly, tw, label_size, pad, bg_verts + cbg * 2) : 0;
         renderer_upload_label_bgs(&renderer, bg_verts, cbg + tbg, cbg);
 
-        /* Update button positions (horizontal, centered at bottom — visible only) */
+        /* Update button positions */
         {
-            float bh = 30.0f, gap = 10.0f, margin = 10.0f;
-            float by = (float)fb_h - bh - margin;
-            /* Compute total width of visible buttons */
-            float total_w = 0.0f;
-            int nvis = 0;
-            for (int bi = 0; bi < ui.count; bi++) {
-                if (!ui.buttons[bi].visible) continue;
-                total_w += ui.buttons[bi].w;
-                nvis++;
-            }
-            if (nvis > 1) total_w += (nvis - 1) * gap;
-            float bx = ((float)map_fb_w - total_w) * 0.5f;
-            for (int bi = 0; bi < ui.count; bi++) {
-                if (!ui.buttons[bi].visible) continue;
-                ui.buttons[bi].x = bx;
-                ui.buttons[bi].y = by;
-                ui.buttons[bi].h = bh;
-                bx += ui.buttons[bi].w + gap;
+            float bh = 28.0f, gap = 10.0f, margin = 10.0f;
+
+            /* Proj button: upper-left corner of map */
+            ui.buttons[btn_proj].x = margin;
+            ui.buttons[btn_proj].y = margin;
+
+            /* Home button: bottom-center of map */
+            ui.buttons[btn_home].x = ((float)map_fb_w - ui.buttons[btn_home].w) * 0.5f;
+            ui.buttons[btn_home].y = (float)fb_h - bh - margin;
+
+            /* Sidebar buttons: positioned in full-window framebuffer coords.
+             * Layout from bottom up:
+             *   MODES label + line + [QRZ] [WSJT] [BCB]
+             *   LAYERS label + line + [AURORA] [SPOR.E] [MUF]
+             */
+            if (sidebar_fb_w > 0) {
+                float sb_left = (float)map_fb_w;
+                float sbw = (float)sidebar_fb_w;
+                float sb_gap = 6.0f;
+                float sb_margin = 8.0f;
+                float label_h = 16.0f;  /* section label font size */
+                float line_gap = 4.0f;  /* gap between line and buttons */
+                float section_gap = 14.0f; /* gap between sections */
+
+                /* Start from bottom */
+                float by = (float)fb_h - bh - sb_margin;
+
+                /* Bottom row: QRZ, WSJT, BCB (MODES section) */
+                int bottom_btns[] = { btn_opt1, btn_opt2, btn_opt3 };
+                float row_w = 0;
+                for (int i = 0; i < 3; i++) row_w += ui.buttons[bottom_btns[i]].w;
+                row_w += 2 * sb_gap;
+                float rx = sb_left + (sbw - row_w) * 0.5f;
+                for (int i = 0; i < 3; i++) {
+                    ui.buttons[bottom_btns[i]].x = rx;
+                    ui.buttons[bottom_btns[i]].y = by;
+                    rx += ui.buttons[bottom_btns[i]].w + sb_gap;
+                }
+                /* MODES label + line sits above the buttons */
+                ui.section_modes_y = by - line_gap - 2.0f; /* line Y (full-window) */
+                ui.section_modes_label_y = ui.section_modes_y - label_h - 8.0f;
+
+                /* Upper row: Aurora, Spor.E, MUF (LAYERS section) */
+                by = ui.section_modes_label_y - section_gap - bh;
+                int upper_btns[] = { btn_aurora, btn_spore, btn_muf };
+                row_w = 0;
+                for (int i = 0; i < 3; i++) row_w += ui.buttons[upper_btns[i]].w;
+                row_w += 2 * sb_gap;
+                rx = sb_left + (sbw - row_w) * 0.5f;
+                for (int i = 0; i < 3; i++) {
+                    ui.buttons[upper_btns[i]].x = rx;
+                    ui.buttons[upper_btns[i]].y = by;
+                    rx += ui.buttons[upper_btns[i]].w + sb_gap;
+                }
+                /* LAYERS label + line sits above the buttons */
+                ui.section_layers_y = by - line_gap - 2.0f;
+                ui.section_layers_label_y = ui.section_layers_y - label_h - 8.0f;
             }
         }
 
         /* Build and upload button geometry */
         {
-            float btn_quads[UI_MAX_BUTTONS * 12];
+            float btn_quads[16 * 84 * 2]; /* rounded rect: ~84 verts * 2 floats per button */
+            float btn_outlines[16 * 56 * 2]; /* outline: ~56 verts * 2 floats per button */
             float btn_text[8192];
-            int quad_count, text_count, hovered_quad;
+            int quad_count, outline_count, text_count, hovered_quad;
+            int btn_offsets[16], btn_counts[16];
+            int ol_offsets[16], ol_counts[16];
             ui_build_geometry(&ui, btn_quads, &quad_count,
+                              btn_offsets, btn_counts,
+                              btn_outlines, &outline_count,
+                              ol_offsets, ol_counts,
                               btn_text, &text_count, &hovered_quad);
+
+            /* Add section labels and horizontal lines to button text buffer */
+            if (sidebar_fb_w > 0) {
+                float sb_left = (float)map_fb_w;
+                float sbw = (float)sidebar_fb_w;
+                float lsz = 14.0f;  /* label font size */
+                float line_inset = 12.0f;
+
+                /* "LAYERS" label */
+                float lw = text_width("LAYERS", lsz);
+                text_count += text_build("LAYERS",
+                    sb_left + (sbw - lw) * 0.5f, ui.section_layers_label_y,
+                    lsz, btn_text + text_count * 2, 8192 - text_count);
+                /* Horizontal line below LAYERS */
+                int li = text_count * 2;
+                btn_text[li+0] = sb_left + line_inset;
+                btn_text[li+1] = ui.section_layers_y;
+                btn_text[li+2] = sb_left + sbw - line_inset;
+                btn_text[li+3] = ui.section_layers_y;
+                text_count += 2;
+
+                /* "MODES" label */
+                lw = text_width("MODES", lsz);
+                text_count += text_build("MODES",
+                    sb_left + (sbw - lw) * 0.5f, ui.section_modes_label_y,
+                    lsz, btn_text + text_count * 2, 8192 - text_count);
+                /* Horizontal line below MODES */
+                li = text_count * 2;
+                btn_text[li+0] = sb_left + line_inset;
+                btn_text[li+1] = ui.section_modes_y;
+                btn_text[li+2] = sb_left + sbw - line_inset;
+                btn_text[li+3] = ui.section_modes_y;
+                text_count += 2;
+            }
+
+            /* Compute active quad: highlight Proj button when in ortho mode */
+            int active_quad = -1;
+            if (projection_get_mode() == PROJ_ORTHO) {
+                int vis = 0;
+                for (int bi = 0; bi < ui.count; bi++) {
+                    if (!ui.buttons[bi].visible) continue;
+                    if (bi == btn_proj) { active_quad = vis; break; }
+                    vis++;
+                }
+            }
+            /* Count visible buttons */
+            int nvis = 0;
+            for (int bi = 0; bi < ui.count; bi++)
+                if (ui.buttons[bi].visible) nvis++;
             if (quad_count > 0 || text_count > 0)
                 renderer_upload_buttons(&renderer, btn_quads, quad_count,
+                                        btn_offsets, btn_counts,
+                                        btn_outlines, outline_count,
+                                        ol_offsets, ol_counts,
                                         btn_text, text_count,
-                                        quad_count / 6, hovered_quad);
+                                        nvis, hovered_quad, active_quad);
         }
 
         /* Build and upload popup geometry */
@@ -753,61 +874,41 @@ int main(int argc, char **argv)
                 double max_diam = 2.0 * projection_get_radius();
                 if (cam.zoom_km > (float)max_diam)
                     cam.zoom_km = (float)max_diam;
-            } else if (ui.clicked == btn_mode) {
-                /* Show mode sub-buttons, hide top-level menus */
-                ui.buttons[btn_proj].visible = 0;
-                ui.buttons[btn_mode].visible = 0;
-                ui.buttons[btn_layers].visible = 0;
-                ui.buttons[btn_opt1].visible = 1;
-                ui.buttons[btn_opt2].visible = 1;
-                ui.buttons[btn_opt3].visible = 1;
-            } else if (ui.clicked == btn_layers) {
-                /* Show layers sub-buttons, hide top-level menus */
-                ui.buttons[btn_proj].visible = 0;
-                ui.buttons[btn_mode].visible = 0;
-                ui.buttons[btn_layers].visible = 0;
-                ui.buttons[btn_aurora].visible = 1;
-                ui.buttons[btn_spore].visible = 1;
-                ui.buttons[btn_muf].visible = 1;
             } else if (ui.clicked == btn_opt1) {
+                /* QRZ: use popup for callsign entry, clear info */
+                ui.station_info_lines = 0;
+                dist = 0; az_to = 0; az_from = 0;
+                renderer_upload_target_line(&renderer, NULL, 0);
+                ui_hide_popup(&ui);
                 if (!has_qrz) {
                     ui_show_popup(&ui, "QRZ LOOKUP");
                     strncpy(ui.popup_result[0], "NO QRZ CREDENTIALS", sizeof(ui.popup_result[0]) - 1);
                     strncpy(ui.popup_result[1], "IN CONFIG", sizeof(ui.popup_result[1]) - 1);
                     ui.popup_result_lines = 2;
                     ui.popup_input_active = 0;
-                } else if (ui.sidebar_visible) {
-                    ui.sidebar_qrz_active = 1;
-                    ui_popup_clear_input(&ui);
-                    ui.popup_input_active = 1;
-                    last_text_update = 0;
                 } else {
                     ui_show_popup(&ui, "QRZ LOOKUP");
                 }
+                last_text_update = 0;
             } else if (ui.clicked == btn_opt2) {
+                /* WSJT: clear info, show popup */
+                ui.station_info_lines = 0;
+                dist = 0; az_to = 0; az_from = 0;
+                renderer_upload_target_line(&renderer, NULL, 0);
+                ui_hide_popup(&ui);
+                ui_popup_clear_input(&ui);
+                last_text_update = 0;
                 ui_show_popup(&ui, "WSJT");
             } else if (ui.clicked == btn_opt3) {
-                ui_show_popup(&ui, "BCB");
-            } else if (ui.clicked == btn_sidebar) {
-                ui.sidebar_visible = !ui.sidebar_visible;
-                if (!ui.sidebar_visible) {
-                    ui.sidebar_qrz_active = 0;
-                    ui.popup_input_active = 0;
-                }
-            } else if (ui.clicked == btn_home) {
-                /* Collapse everything back to home */
-                ui.buttons[btn_proj].visible = 1;
-                ui.buttons[btn_mode].visible = 1;
-                ui.buttons[btn_layers].visible = 1;
-                ui.buttons[btn_opt1].visible = 0;
-                ui.buttons[btn_opt2].visible = 0;
-                ui.buttons[btn_opt3].visible = 0;
-                ui.buttons[btn_aurora].visible = 0;
-                ui.buttons[btn_spore].visible = 0;
-                ui.buttons[btn_muf].visible = 0;
+                /* BCB: just clear info */
+                ui.station_info_lines = 0;
+                dist = 0; az_to = 0; az_from = 0;
+                renderer_upload_target_line(&renderer, NULL, 0);
                 ui_hide_popup(&ui);
-                ui.sidebar_qrz_active = 0;
-                ui.popup_input_active = 0;
+                ui_popup_clear_input(&ui);
+                last_text_update = 0;
+            } else if (ui.clicked == btn_home) {
+                ui_hide_popup(&ui);
             }
             ui.clicked = -1;
         }
@@ -841,45 +942,39 @@ int main(int argc, char **argv)
                     int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
                     renderer_upload_target_line(&renderer, gc_verts, gc_n);
                 }
-                /* Force HUD rebuild */
+                /* Close popup and show results in sidebar */
+                ui_hide_popup(&ui);
                 last_text_update = 0;
 
-                /* Fill popup result lines */
-                strncpy(ui.popup_result[0], qrz_result.call,
-                        sizeof(ui.popup_result[0]) - 1);
-                /* Uppercase name for stroke font */
+                /* Fill station_info for sidebar display */
+                ui.station_info_lines = 0;
+                snprintf(ui.station_info[ui.station_info_lines++],
+                         sizeof(ui.station_info[0]), "CALL: %s", qrz_result.call);
                 {
-                    char upper_name[128];
-                    int ni = 0;
-                    for (int ci = 0; qrz_result.name[ci] && ni < 127; ci++)
-                        upper_name[ni++] = (char)toupper((unsigned char)qrz_result.name[ci]);
-                    upper_name[ni] = '\0';
-                    strncpy(ui.popup_result[1], upper_name,
-                            sizeof(ui.popup_result[1]) - 1);
+                    char upper_name[40] = {0};
+                    for (int ci = 0; qrz_result.name[ci] && ci < 39; ci++)
+                        upper_name[ci] = (char)toupper((unsigned char)qrz_result.name[ci]);
+                    snprintf(ui.station_info[ui.station_info_lines++],
+                             sizeof(ui.station_info[0]), "NAME: %s", upper_name);
                 }
                 {
-                    char upper_loc[128];
-                    int li = 0;
-                    for (int ci = 0; qrz_result.location[ci] && li < 127; ci++)
-                        upper_loc[li++] = (char)toupper((unsigned char)qrz_result.location[ci]);
-                    upper_loc[li] = '\0';
-                    strncpy(ui.popup_result[2], upper_loc,
-                            sizeof(ui.popup_result[2]) - 1);
+                    char upper_loc[40] = {0};
+                    for (int ci = 0; qrz_result.location[ci] && ci < 39; ci++)
+                        upper_loc[ci] = (char)toupper((unsigned char)qrz_result.location[ci]);
+                    snprintf(ui.station_info[ui.station_info_lines++],
+                             sizeof(ui.station_info[0]), "LOC: %s", upper_loc);
                 }
                 {
                     char coord[64];
                     format_coord(coord, sizeof(coord), qrz_result.lat, qrz_result.lon);
-                    char upper_grid[16];
-                    int gi = 0;
-                    for (int ci = 0; qrz_result.grid[ci] && gi < 15; ci++)
-                        upper_grid[gi++] = (char)toupper((unsigned char)qrz_result.grid[ci]);
-                    upper_grid[gi] = '\0';
-                    snprintf(ui.popup_result[3], sizeof(ui.popup_result[3]),
-                             "GRID: %.10s  %.24s", upper_grid, coord);
+                    char upper_grid[16] = {0};
+                    for (int ci = 0; qrz_result.grid[ci] && ci < 15; ci++)
+                        upper_grid[ci] = (char)toupper((unsigned char)qrz_result.grid[ci]);
+                    snprintf(ui.station_info[ui.station_info_lines++],
+                             sizeof(ui.station_info[0]), "GRID: %s", upper_grid);
+                    snprintf(ui.station_info[ui.station_info_lines++],
+                             sizeof(ui.station_info[0]), "%.47s", coord);
                 }
-                ui.popup_result_lines = 4;
-                if (ui.sidebar_qrz_active)
-                    ui.popup_input_active = 0;
             } else {
                 /* Error */
                 char upper_err[64];
@@ -893,8 +988,8 @@ int main(int argc, char **argv)
             }
         }
 
-        /* Force text rebuild every frame when sidebar QRZ input is active (cursor blink) */
-        if (ui.sidebar_qrz_active && ui.popup_input_active)
+        /* Force text rebuild every frame when popup input is active (cursor blink) */
+        if (ui.popup.visible && ui.popup_input_active)
             last_text_update = 0;
 
         /* Rebuild HUD text every second */
@@ -951,28 +1046,6 @@ int main(int argc, char **argv)
                                       csz, sb_verts + svc * 2, 2048 - svc);
                     y += csz * 2.5f;
 
-                    /* QRZ input + results in sidebar */
-                    if (ui.sidebar_qrz_active) {
-                        char call_line[48];
-                        int cursor_on = ui.popup_input_active
-                                        && ((int)(glfwGetTime() * 2.0) % 2);
-                        snprintf(call_line, sizeof(call_line), "CALL: %s%s",
-                                 ui.popup_input, cursor_on ? "_" : "");
-                        svc += text_build(call_line,
-                                          (sbw - text_width(call_line, csz)) * 0.5f, y,
-                                          csz, sb_verts + svc * 2, 2048 - svc);
-                        y += csz * 1.5f;
-
-                        float rsz = 14.0f;
-                        for (int ri = 0; ri < ui.popup_result_lines; ri++) {
-                            svc += text_build(ui.popup_result[ri],
-                                              (sbw - text_width(ui.popup_result[ri], rsz)) * 0.5f, y,
-                                              rsz, sb_verts + svc * 2, 2048 - svc);
-                            y += rsz * 1.5f;
-                        }
-                        y += csz * 1.0f;
-                    }
-
                     /* Station info from swl dashboard */
                     if (ui.station_info_lines > 0) {
                         float sisz = 14.0f;
@@ -985,21 +1058,23 @@ int main(int argc, char **argv)
                         y += csz * 1.0f;
                     }
 
-                    char dist_line[64], azto_line[64], azfr_line[64];
-                    snprintf(dist_line, sizeof(dist_line), "DIST  %.1f KM", dist);
-                    snprintf(azto_line, sizeof(azto_line), "AZ TO  %.1f^", az_to);
-                    snprintf(azfr_line, sizeof(azfr_line), "AZ FROM  %.1f^", az_from);
-                    svc += text_build(dist_line,
-                                      (sbw - text_width(dist_line, csz)) * 0.5f, y,
-                                      csz, sb_verts + svc * 2, 2048 - svc);
-                    y += csz * 1.5f;
-                    svc += text_build(azto_line,
-                                      (sbw - text_width(azto_line, csz)) * 0.5f, y,
-                                      csz, sb_verts + svc * 2, 2048 - svc);
-                    y += csz * 1.5f;
-                    svc += text_build(azfr_line,
-                                      (sbw - text_width(azfr_line, csz)) * 0.5f, y,
-                                      csz, sb_verts + svc * 2, 2048 - svc);
+                    if (dist > 0.0) {
+                        char dist_line[64], azto_line[64], azfr_line[64];
+                        snprintf(dist_line, sizeof(dist_line), "DIST  %.1f KM", dist);
+                        snprintf(azto_line, sizeof(azto_line), "AZ TO  %.1f^", az_to);
+                        snprintf(azfr_line, sizeof(azfr_line), "AZ FROM  %.1f^", az_from);
+                        svc += text_build(dist_line,
+                                          (sbw - text_width(dist_line, csz)) * 0.5f, y,
+                                          csz, sb_verts + svc * 2, 2048 - svc);
+                        y += csz * 1.5f;
+                        svc += text_build(azto_line,
+                                          (sbw - text_width(azto_line, csz)) * 0.5f, y,
+                                          csz, sb_verts + svc * 2, 2048 - svc);
+                        y += csz * 1.5f;
+                        svc += text_build(azfr_line,
+                                          (sbw - text_width(azfr_line, csz)) * 0.5f, y,
+                                          csz, sb_verts + svc * 2, 2048 - svc);
+                    }
 
                     renderer_upload_sidebar_text(&renderer, sb_verts, svc);
                 }
@@ -1026,6 +1101,9 @@ int main(int argc, char **argv)
             renderer_upload_sidebar(&renderer, sidebar_fb_w, fb_h);
             renderer_draw_sidebar(&renderer, sidebar_fb_w, fb_h);
         }
+
+        /* Draw buttons in full-window viewport (spans map + sidebar) */
+        renderer_draw_buttons(&renderer, fb_w, fb_h);
 
         glfwSwapBuffers(window);
     }

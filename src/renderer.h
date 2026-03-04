@@ -92,11 +92,19 @@ typedef struct {
     unsigned int btn_bg_vao;
     unsigned int btn_bg_vbo;
     int          btn_bg_vertex_count;
+    unsigned int btn_outline_vao;
+    unsigned int btn_outline_vbo;
+    int          btn_outline_vertex_count;
+    int          btn_outline_offsets[16];
+    int          btn_outline_counts[16];
     unsigned int btn_text_vao;
     unsigned int btn_text_vbo;
     int          btn_text_vertex_count;
     int          btn_count;        /* number of visible buttons */
+    int          btn_offsets[16]; /* per-button vertex offset */
+    int          btn_counts[16];  /* per-button vertex count */
     int          btn_hovered_quad; /* visible-button index of hovered button (-1 = none) */
+    int          btn_active_quad;  /* visible-button index of active/toggled button (-1 = none) */
 
     /* Popup panel (pixel-space) */
     unsigned int popup_bg_vao;
@@ -156,13 +164,20 @@ void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int spl
  * split: vertex index where center bg ends and target bg begins. */
 void renderer_upload_label_bgs(Renderer *r, float *verts, int vertex_count, int split);
 
-/* Upload UI button geometry (pixel-space).
- * quad_verts: GL_TRIANGLES background quads, text_verts: GL_LINES label text.
- * btn_count: number of visible buttons, hovered_quad: which one is hovered (-1 = none). */
+/* Upload UI button geometry (pixel-space, rounded rectangles).
+ * quad_verts: GL_TRIANGLES background, text_verts: GL_LINES label text.
+ * btn_offsets/btn_counts: per-button vertex offset and count.
+ * btn_count: number of visible buttons, hovered_quad/active_quad: indices (-1 = none). */
 void renderer_upload_buttons(Renderer *r,
                              float *quad_verts, int quad_vert_count,
+                             int *btn_offsets, int *btn_counts,
+                             float *outline_verts, int outline_vert_count,
+                             int *ol_offsets, int *ol_counts,
                              float *text_verts, int text_vert_count,
-                             int btn_count, int hovered_quad);
+                             int btn_count, int hovered_quad, int active_quad);
+
+/* Draw UI buttons in their own full-window viewport pass. */
+void renderer_draw_buttons(const Renderer *r, int fb_w, int fb_h);
 
 /* Upload popup panel geometry (pixel-space).
  * quad_verts: 3 quads (body, title bar, close btn) as GL_TRIANGLES.

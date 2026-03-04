@@ -1,6 +1,51 @@
 #include "ui.h"
 #include "text.h"
 #include <string.h>
+#include <math.h>
+
+#define CORNER_RADIUS 6.0f
+#define CORNER_SEGS   6
+
+/* Emit a rounded rectangle as triangles (triangle fan from center).
+ * Returns number of vertices written. */
+static int emit_rounded_rect(float *buf, float x0, float y0, float x1, float y1, float r)
+{
+    if (r < 1.0f) r = 1.0f;
+    float cx = (x0 + x1) * 0.5f;
+    float cy = (y0 + y1) * 0.5f;
+    int n = 0;
+
+    /* Build perimeter points: 4 corners with arc segments */
+    float perim[4 * (CORNER_SEGS + 1) * 2]; /* x,y pairs */
+    int pp = 0;
+    /* Corner centers and start angles */
+    float corners[4][3] = {
+        { x1 - r, y0 + r, -M_PI * 0.5f }, /* top-right */
+        { x1 - r, y1 - r,  0.0f },          /* bottom-right */
+        { x0 + r, y1 - r,  M_PI * 0.5f },  /* bottom-left */
+        { x0 + r, y0 + r,  M_PI },          /* top-left */
+    };
+    for (int c = 0; c < 4; c++) {
+        float ccx = corners[c][0], ccy = corners[c][1], start = corners[c][2];
+        for (int s = 0; s <= CORNER_SEGS; s++) {
+            float a = start + (float)s * (M_PI * 0.5f) / (float)CORNER_SEGS;
+            perim[pp++] = ccx + r * cosf(a);
+            perim[pp++] = ccy + r * sinf(a);
+        }
+    }
+    int npts = pp / 2;
+
+    /* Triangle fan from center */
+    for (int i = 0; i < npts; i++) {
+        int j = (i + 1) % npts;
+        int bi = n * 2;
+        buf[bi + 0] = cx;           buf[bi + 1] = cy;
+        buf[bi + 2] = perim[i*2];   buf[bi + 3] = perim[i*2+1];
+        buf[bi + 4] = perim[j*2];   buf[bi + 5] = perim[j*2+1];
+        n += 3;
+    }
+    return n;
+}
 
 void ui_init(UI *ui)
 {
@@ -63,12 +108,50 @@ int ui_hit_test(const UI *ui, float mx, float my)
     return -1;
 }
 
+/* Emit rounded rectangle outline as GL_LINES (pairs of vertices).
+ * Returns number of vertices written. */
+static int emit_rounded_rect_outline(float *buf, float x0, float y0, float x1, float y1, float r)
+{
+    if (r < 1.0f) r = 1.0f;
+    /* Build perimeter points (same as fill) */
+    float perim[4 * (CORNER_SEGS + 1) * 2];
+    int pp = 0;
+    float corners[4][3] = {
+        { x1 - r, y0 + r, -M_PI * 0.5f },
+        { x1 - r, y1 - r,  0.0f },
+        { x0 + r, y1 - r,  M_PI * 0.5f },
+        { x0 + r, y0 + r,  M_PI },
+    };
+    for (int c = 0; c < 4; c++) {
+        float ccx = corners[c][0], ccy = corners[c][1], start = corners[c][2];
+        for (int s = 0; s <= CORNER_SEGS; s++) {
+            float a = start + (float)s * (M_PI * 0.5f) / (float)CORNER_SEGS;
+            perim[pp++] = ccx + r * cosf(a);
+            perim[pp++] = ccy + r * sinf(a);
+        }
+    }
+    int npts = pp / 2;
+    int n = 0;
+    for (int i = 0; i < npts; i++) {
+        int j = (i + 1) % npts;
+        int bi = n * 2;
+        buf[bi + 0] = perim[i*2];   buf[bi + 1] = perim[i*2+1];
+        buf[bi + 2] = perim[j*2];   buf[bi + 3] = perim[j*2+1];
+        n += 2;
+    }
+    return n;
+}
+
 void ui_build_geometry(const UI *ui,
                        float *quad_verts, int *quad_count,
+                       int *btn_offsets, int *btn_counts,
+                       float *outline_verts, int *outline_count,
+                       int *ol_offsets, int *ol_counts,
                        float *text_verts, int *text_count,
                        int *hovered_quad)
 {
     *quad_count = 0;
+    *outline_count = 0;
     *text_count = 0;
     *hovered_quad = -1;
 
@@ -77,17 +160,27 @@ void ui_build_geometry(const UI *ui,
         const UIButton *b = &ui->buttons[i];
         if (!b->visible) continue;
 
-        /* Background quad (2 triangles, 6 vertices) */
-        float x0 = b->x, y0 = b->y;
-        float x1 = b->x + b->w, y1 = b->y + b->h;
-        int qi = *quad_count * 2;
-        quad_verts[qi+ 0] = x0; quad_verts[qi+ 1] = y0;
-        quad_verts[qi+ 2] = x1; quad_verts[qi+ 3] = y0;
-        quad_verts[qi+ 4] = x1; quad_verts[qi+ 5] = y1;
-        quad_verts[qi+ 6] = x0; quad_verts[qi+ 7] = y0;
-        quad_verts[qi+ 8] = x1; quad_verts[qi+ 9] = y1;
-        quad_verts[qi+10] = x0; quad_verts[qi+11] = y1;
-        *quad_count += 6;
+        /* Rounded rectangle fill */
+        int offset = *quad_count;
+        int nv = emit_rounded_rect(quad_verts + *quad_count * 2,
+                                   b->x, b->y, b->x + b->w, b->y + b->h,
+                                   CORNER_RADIUS);
+        if (vis < 16) {
+            btn_offsets[vis] = offset;
+            btn_counts[vis] = nv;
+        }
+        *quad_count += nv;
+
+        /* Rounded rectangle outline */
+        int ol_offset = *outline_count;
+        int ol_nv = emit_rounded_rect_outline(outline_verts + *outline_count * 2,
+                                              b->x, b->y, b->x + b->w, b->y + b->h,
+                                              CORNER_RADIUS);
+        if (vis < 16) {
+            ol_offsets[vis] = ol_offset;
+            ol_counts[vis] = ol_nv;
+        }
+        *outline_count += ol_nv;
 
         if (i == ui->hovered)
             *hovered_quad = vis;

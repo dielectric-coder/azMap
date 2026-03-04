@@ -60,6 +60,7 @@ Lines starting with `#` are comments. Whitespace around `=` is ignored. `lat` an
 
 - `-c NAME` — Center location name (displayed as label; overrides config name)
 - `-t NAME` — Target location name (displayed as label)
+- `-d DETAIL` — Station detail string (`station|freq|country|site|lang|target`), parsed into sidebar info
 - `-s PATH` — Shapefile path override
 
 For backward compatibility, a bare fifth argument is still accepted as the shapefile path.
@@ -122,4 +123,10 @@ shaders/
 
 **UI popup**: The `UIPopup` struct stores position offset (`offset_x`, `offset_y`) for drag support. The popup is centered on show (`ui_show_popup()` resets offsets) and can be dragged by its title bar. `input.c` detects title-bar presses via hit-testing the top 30px of the popup bounds, then accumulates cursor deltas into the offset during drag. The `popup_dragging` flag in `InputState` distinguishes popup drags from map pans. Clicks outside the popup pass through to button hit-testing; clicks inside are consumed.
 
-**Sidebar QRZ**: When the sidebar is visible, clicking the QRZ button activates inline callsign input in the sidebar (`sidebar_qrz_active`) instead of opening a popup. The input field shows a blinking cursor and accepts the same A-Z/0-9/slash input as the popup. Results display directly below the input in the sidebar. Pressing Escape dismisses the sidebar QRZ input without closing the sidebar. Closing the sidebar or pressing Home also clears the QRZ input state.
+**Sidebar panel**: The sidebar is always visible (no toggle). It displays UTC/local clocks, station info from the swl dashboard (received via FIFO or `-d` CLI arg), and distance/azimuth readouts. The bottom of the sidebar has two sections with labeled button groups: "LAYERS" (Aurora, Spor.E, MUF) and "MODES" (QRZ, WSJT, BCB). Section labels and horizontal divider lines are rendered as part of the button text geometry in full-window coordinates.
+
+**Button system**: Buttons use rounded rectangles (`emit_rounded_rect()` for fill, `emit_rounded_rect_outline()` for border) with per-button vertex offsets/counts. Three visual states: normal (dark), hovered (lighter), active (blue, used for Proj in ortho mode). The Proj button is always in the upper-left of the map; Home is bottom-center of the map; sidebar buttons are positioned in two rows at the bottom of the sidebar. Buttons are drawn in a separate full-window viewport pass (`renderer_draw_buttons()`) after the sidebar, so they can span both map and sidebar areas.
+
+**Mode buttons**: QRZ opens a popup for callsign entry; on successful lookup the popup closes and results (call, name, location, grid, coordinates) display in the sidebar `station_info` fields, with target line/marker/dist/az updating. WSJT opens a popup (placeholder). BCB clears all info. All three clear previous station info, distance/azimuth, target line, target marker, and target label when clicked.
+
+**FIFO IPC**: azMap creates a named pipe at `/tmp/azmap-target.fifo` (`O_RDWR | O_NONBLOCK`) for receiving target updates from the swl dashboard. Wire format: `lat,lon,name|station|freq|country|site|lang|target\n`. The `|`-delimited detail fields after the name are parsed into `ui.station_info[]` for sidebar display. The `-d` CLI option provides the same detail string at launch time (used by swl when spawning a new azMap instance).

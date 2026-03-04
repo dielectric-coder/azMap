@@ -17,7 +17,10 @@ Interactive map projection viewer with two modes: azimuthal equidistant (full Ea
 - Named location labels (optional `-c` / `-t` flags)
 - North pole indicator triangle
 - Real-time day/night overlay with smooth twilight gradient (civil, nautical, astronomical)
-- QRZ callsign lookup (popup or inline in sidebar panel)
+- Sidebar panel with UTC/local clocks, station info, distance/azimuth readouts
+- Rounded rectangle buttons with hover highlighting, organized in labeled sections (LAYERS / MODES)
+- QRZ callsign lookup via popup with results displayed in sidebar
+- FIFO IPC for live target updates from swl dashboard
 - Smooth zoom (10 km to full Earth) and pan
 - Vector stroke font for all text (no external font dependencies)
 
@@ -61,7 +64,10 @@ Download [Natural Earth 110m](https://www.naturalearthdata.com/downloads/) shape
 | Scroll wheel | Zoom in/out |
 | Left-drag / Arrow keys | Pan |
 | Proj button | Toggle azimuthal equidistant / orthographic projection |
-| QRZ button | Callsign lookup (inline in sidebar when visible, popup otherwise) |
+| QRZ button | Callsign lookup via popup, results in sidebar |
+| WSJT button | WSJT-X integration (placeholder) |
+| BCB button | Clear station info, target line, and distance/azimuth |
+| Aurora / Spor.E / MUF | Layer toggles (planned) |
 | R | Reset view |
 | Q / Esc | Quit |
 

@@ -18,7 +18,7 @@ static void char_callback(GLFWwindow *window, unsigned int codepoint)
     (void)window;
     if (!g_input || !g_input->ui) return;
     UI *u = g_input->ui;
-    if (!(u->popup.visible || u->sidebar_qrz_active) || !u->popup_input_active) return;
+    if (!u->popup.visible || !u->popup_input_active) return;
 
     char ch = (char)toupper((unsigned char)codepoint);
     /* Accept A-Z, 0-9, / */
@@ -36,8 +36,8 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     (void)mods;
     if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
 
-    /* When popup/sidebar input is active, handle text editing keys and suppress others */
-    if (g_input->ui && (g_input->ui->popup.visible || g_input->ui->sidebar_qrz_active)
+    /* When popup input is active, handle text editing keys and suppress others */
+    if (g_input->ui && g_input->ui->popup.visible
         && g_input->ui->popup_input_active) {
         UI *u = g_input->ui;
         if (key == GLFW_KEY_BACKSPACE) {
@@ -49,12 +49,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
                 u->popup_submitted = 1;
             }
         } else if (key == GLFW_KEY_ESCAPE) {
-            if (u->sidebar_qrz_active) {
-                u->sidebar_qrz_active = 0;
-                u->popup_input_active = 0;
-            } else {
-                ui_hide_popup(u);
-            }
+            ui_hide_popup(u);
         }
         return; /* suppress all other keys */
     }
@@ -122,9 +117,15 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
             double mx, my;
             glfwGetCursorPos(window, &mx, &my);
 
-            /* Consume clicks in sidebar area */
+            /* Sidebar area: only allow button clicks, block map interaction */
             float fb_x = (float)mx * g_input->cursor_scale_x;
-            if (in_sidebar(fb_x)) return;
+            if (in_sidebar(fb_x)) {
+                float fb_y = (float)my * g_input->cursor_scale_y;
+                int hit = ui_hit_test(g_input->ui, fb_x, fb_y);
+                if (hit >= 0)
+                    g_input->ui->clicked = hit;
+                return;
+            }
 
             g_input->press_x = mx;
             g_input->press_y = my;
@@ -186,10 +187,14 @@ static void cursor_pos_callback(GLFWwindow *window, double xpos, double ypos)
 {
     (void)window;
 
-    /* Ignore cursor movement in sidebar area */
+    /* Sidebar area: allow hover on buttons, block map panning */
     {
         float fb_x_check = (float)xpos * g_input->cursor_scale_x;
         if (in_sidebar(fb_x_check) && !g_input->popup_dragging) {
+            if (!g_input->pressed && g_input->ui) {
+                float fb_y_check = (float)ypos * g_input->cursor_scale_y;
+                g_input->ui->hovered = ui_hit_test(g_input->ui, fb_x_check, fb_y_check);
+            }
             g_input->last_mouse_x = xpos;
             g_input->last_mouse_y = ypos;
             return;

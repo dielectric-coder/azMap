@@ -110,6 +110,7 @@ When a valid config file provides the center location, only `target_lat` and `ta
 |------|-------------|
 | `-c NAME` | Display name for the center location (overrides config name) |
 | `-t NAME` | Display name for the target location |
+| `-d DETAIL` | Station detail string for sidebar display (`station\|freq\|country\|site\|lang\|target`) |
 | `-s PATH` | Override the default coastline shapefile path |
 
 For backward compatibility, a bare fifth positional argument is also accepted as the shapefile path.
@@ -162,15 +163,31 @@ All other features (day/night overlay, markers, labels, pan, zoom) work in both 
 
 If no `-c` or `-t` name is given, labels show coordinates only (e.g., `40.42N, 3.70W`).
 
-### QRZ Lookup Popup
+### Sidebar Panel
 
-The QRZ button opens a popup panel for looking up amateur radio callsigns. Type a callsign and press Enter to query the QRZ.com XML API. Results show the operator's name, location, grid square, and coordinates, and the target marker/line update automatically.
+The sidebar is always visible on the right side of the window. It displays:
 
-- The popup can be dragged by its title bar to reposition it
-- Clicking outside the popup passes through to map buttons
+- **UTC and local clocks** at the top
+- **Station info** (from swl dashboard or QRZ lookup) in the middle
+- **Distance and azimuth** readouts (shown only when a target is active)
+- **LAYERS section** — Aurora, Spor.E, MUF buttons (planned)
+- **MODES section** — QRZ, WSJT, BCB buttons
+
+Section labels and horizontal divider lines separate the button groups.
+
+### QRZ Lookup
+
+The QRZ button opens a popup panel for looking up amateur radio callsigns. Type a callsign and press Enter to query the QRZ.com XML API. On success, the popup closes and results (call, name, location, grid, coordinates) display in the sidebar. The target marker, line, and distance/azimuth update automatically.
+
+- The popup can be dragged by its title bar
 - Press Esc or the X button to close
-- After a lookup, you can backspace and type a new callsign without reopening
 - QRZ credentials (`qrz_user` and `qrz_pass`) must be set in `~/.config/azmap.conf`
+
+### Mode Buttons
+
+- **QRZ** — Opens callsign lookup popup. Clears previous station info and target.
+- **WSJT** — Opens WSJT popup (placeholder). Clears previous info.
+- **BCB** — Clears station info, target line, marker, label, and distance/azimuth.
 
 ## Controls
 
@@ -180,7 +197,9 @@ The QRZ button opens a popup panel for looking up amateur radio callsigns. Type 
 | Left mouse drag | Pan the map |
 | Arrow keys | Pan the map |
 | Proj button | Toggle azimuthal equidistant / orthographic projection |
-| QRZ button | Open callsign lookup popup |
+| QRZ button | Open callsign lookup popup (clears previous info) |
+| WSJT button | Open WSJT popup (clears previous info) |
+| BCB button | Clear station info, target, and distance/azimuth |
 | Drag popup title bar | Reposition the popup window |
 | R | Reset view (full Earth, centered) |
 | Q / Esc (or Esc in popup) | Quit (or close popup) |

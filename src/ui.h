@@ -37,7 +37,12 @@ typedef struct {
     /* Sidebar panel */
     int      sidebar_visible;
     int      sidebar_fb_w;           /* width in framebuffer pixels */
-    int      sidebar_qrz_active;    /* QRZ input shown in sidebar */
+
+    /* Sidebar section label positions (full-window framebuffer coords) */
+    float    section_layers_label_y;  /* "LAYERS" text Y */
+    float    section_layers_y;        /* horizontal line Y below LAYERS */
+    float    section_modes_label_y;   /* "MODES" text Y */
+    float    section_modes_y;         /* horizontal line Y below MODES */
 
     /* Station info from swl dashboard (FIFO) */
     char     station_info[6][48];    /* station, freq, country, site, lang, target */
@@ -54,14 +59,21 @@ int ui_add_button(UI *ui, const char *label, float x, float y, float w, float h)
  * Returns button index or -1. */
 int ui_hit_test(const UI *ui, float mx, float my);
 
-/* Build renderable geometry for all visible buttons.
- * quad_verts:  output buffer for background quads (GL_TRIANGLES, 2 floats/vert).
- * quad_count:  receives total quad vertices written.
- * text_verts:  output buffer for label text (GL_LINES, 2 floats/vert).
- * text_count:  receives total text vertices written.
- * hovered_quad: receives visible-button index of hovered button (-1 if none). */
+/* Build renderable geometry for all visible buttons (rounded rectangles).
+ * quad_verts:    output buffer for background triangles (2 floats/vert).
+ * quad_count:    receives total fill vertices written.
+ * btn_offsets/btn_counts: per-button fill vertex offset and count arrays (size 16).
+ * outline_verts: output buffer for border GL_LINES (2 floats/vert).
+ * outline_count: receives total outline vertices written.
+ * ol_offsets/ol_counts: per-button outline vertex offset and count arrays (size 16).
+ * text_verts:    output buffer for label text (GL_LINES, 2 floats/vert).
+ * text_count:    receives total text vertices written.
+ * hovered_quad:  receives visible-button index of hovered button (-1 if none). */
 void ui_build_geometry(const UI *ui,
                        float *quad_verts, int *quad_count,
+                       int *btn_offsets, int *btn_counts,
+                       float *outline_verts, int *outline_count,
+                       int *ol_offsets, int *ol_counts,
                        float *text_verts, int *text_count,
                        int *hovered_quad);
 
