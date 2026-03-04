@@ -5,6 +5,9 @@
 #include <libgen.h>
 #include <limits.h>
 #include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <math.h>
 #include <time.h>
 #include <GL/glew.h>
@@ -482,9 +485,70 @@ int main(int argc, char **argv)
     /* HUD text timer (outside loop so QRZ can force rebuild) */
     time_t last_text_update = 0;
 
+    /* Named pipe for IPC (swl dashboard → azMap target updates) */
+    #define FIFO_PATH "/tmp/azmap-target.fifo"
+    mkfifo(FIFO_PATH, 0666); /* no-op if already exists */
+    int fifo_fd = open(FIFO_PATH, O_RDWR | O_NONBLOCK);
+    /* O_RDWR keeps fd alive even when writer closes */
+    char fifo_buf[256];
+    int fifo_buf_len = 0;
+
     /* Main loop */
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+
+        /* Check named pipe for target updates from swl dashboard */
+        if (fifo_fd >= 0) {
+            ssize_t nr = read(fifo_fd, fifo_buf + fifo_buf_len,
+                              sizeof(fifo_buf) - 1 - fifo_buf_len);
+            if (nr > 0) {
+                fifo_buf_len += (int)nr;
+                fifo_buf[fifo_buf_len] = '\0';
+                /* Process last complete line (delimited by newline) */
+                char *last_nl = strrchr(fifo_buf, '\n');
+                if (last_nl) {
+                    *last_nl = '\0';
+                    /* Find start of last complete line */
+                    char *line = strrchr(fifo_buf, '\n');
+                    line = line ? line + 1 : fifo_buf;
+                    /* Parse "lat,lon,name" */
+                    double new_lat, new_lon;
+                    char new_name[64] = {0};
+                    if (sscanf(line, "%lf,%lf,", &new_lat, &new_lon) == 2) {
+                        /* Extract name after second comma */
+                        char *p = strchr(line, ',');
+                        if (p) p = strchr(p + 1, ',');
+                        if (p && *(p + 1))
+                            strncpy(new_name, p + 1, sizeof(new_name) - 1);
+                        /* Update target */
+                        target_lat = new_lat;
+                        target_lon = new_lon;
+                        strncpy(target_name_buf, new_name, sizeof(target_name_buf) - 1);
+                        target_name_buf[sizeof(target_name_buf) - 1] = '\0';
+                        target_name = target_name_buf;
+                        build_label(target_label, sizeof(target_label),
+                                    target_name, target_lat, target_lon);
+                        dist = projection_distance(input.center_lat, input.center_lon,
+                                                   target_lat, target_lon);
+                        az_to = projection_azimuth(input.center_lat, input.center_lon,
+                                                   target_lat, target_lon);
+                        az_from = projection_azimuth(target_lat, target_lon,
+                                                     input.center_lat, input.center_lon);
+                        projection_forward(target_lat, target_lon, &tx, &ty);
+                        projection_forward(center_lat, center_lon, &cx, &cy);
+                        {
+                            float gc_verts[GC_LINE_POINTS * 2];
+                            int gc_n = build_gc_line(center_lat, center_lon,
+                                                     target_lat, target_lon, gc_verts);
+                            renderer_upload_target_line(&renderer, gc_verts, gc_n);
+                        }
+                        last_text_update = 0; /* force HUD refresh */
+                    }
+                    /* Discard processed data */
+                    fifo_buf_len = 0;
+                }
+            }
+        }
 
         /* Handle projection center change (drag / arrow keys) */
         if (input.center_dirty) {
@@ -892,6 +956,10 @@ int main(int argc, char **argv)
                       (int)projection_get_mode(),
                       input.center_lat, input.center_lon,
                       save_ww, save_wh, ui.sidebar_visible);
+
+    /* Cleanup FIFO */
+    if (fifo_fd >= 0) close(fifo_fd);
+    unlink(FIFO_PATH);
 
     /* Cleanup */
     if (has_qrz) qrz_cleanup();
