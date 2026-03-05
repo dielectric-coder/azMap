@@ -62,8 +62,9 @@ static int xml_extract(const char *xml, const char *tag, char *out, int out_sz)
     start += strlen(open);
     const char *end = strstr(start, close);
     if (!end) return -1;
-    int len = (int)(end - start);
-    if (len >= out_sz) len = out_sz - 1;
+    if (end <= start) { out[0] = '\0'; return -1; }
+    size_t len = (size_t)(end - start);
+    if (len >= (size_t)out_sz) len = (size_t)out_sz - 1;
     memcpy(out, start, len);
     out[len] = '\0';
     return 0;

@@ -53,31 +53,35 @@ int config_load(Config *cfg)
 
         if (strcmp(key, "name") == 0) {
             strncpy(cfg->name, val, sizeof(cfg->name) - 1);
+            cfg->name[sizeof(cfg->name) - 1] = '\0';
         } else if (strcmp(key, "lat") == 0) {
-            cfg->lat = atof(val);
+            cfg->lat = strtod(val, NULL);
             has_lat = 1;
         } else if (strcmp(key, "lon") == 0) {
-            cfg->lon = atof(val);
+            cfg->lon = strtod(val, NULL);
             has_lon = 1;
         } else if (strcmp(key, "qrz_user") == 0) {
             strncpy(cfg->qrz_user, val, sizeof(cfg->qrz_user) - 1);
+            cfg->qrz_user[sizeof(cfg->qrz_user) - 1] = '\0';
         } else if (strcmp(key, "qrz_pass") == 0) {
             strncpy(cfg->qrz_pass, val, sizeof(cfg->qrz_pass) - 1);
+            cfg->qrz_pass[sizeof(cfg->qrz_pass) - 1] = '\0';
         } else if (strcmp(key, "target_lat") == 0) {
-            cfg->target_lat = atof(val);
+            cfg->target_lat = strtod(val, NULL);
             has_tlat = 1;
         } else if (strcmp(key, "target_lon") == 0) {
-            cfg->target_lon = atof(val);
+            cfg->target_lon = strtod(val, NULL);
             has_tlon = 1;
         } else if (strcmp(key, "target_name") == 0) {
             strncpy(cfg->target_name, val, sizeof(cfg->target_name) - 1);
+            cfg->target_name[sizeof(cfg->target_name) - 1] = '\0';
         } else if (strcmp(key, "view_zoom_km") == 0) {
-            cfg->view_zoom_km = (float)atof(val);
+            cfg->view_zoom_km = (float)strtod(val, NULL);
             has_vzoom = 1;
         } else if (strcmp(key, "view_pan_x") == 0) {
-            cfg->view_pan_x = (float)atof(val);
+            cfg->view_pan_x = (float)strtod(val, NULL);
         } else if (strcmp(key, "view_pan_y") == 0) {
-            cfg->view_pan_y = (float)atof(val);
+            cfg->view_pan_y = (float)strtod(val, NULL);
         } else if (strcmp(key, "view_proj_mode") == 0) {
             if (strcmp(val, "ortho") == 0)
                 cfg->view_proj_mode = 1;
@@ -85,17 +89,17 @@ int config_load(Config *cfg)
                 cfg->view_proj_mode = 0;
             has_vproj = 1;
         } else if (strcmp(key, "view_center_lat") == 0) {
-            cfg->view_center_lat = atof(val);
+            cfg->view_center_lat = strtod(val, NULL);
             has_vclat = 1;
         } else if (strcmp(key, "view_center_lon") == 0) {
-            cfg->view_center_lon = atof(val);
+            cfg->view_center_lon = strtod(val, NULL);
             has_vclon = 1;
         } else if (strcmp(key, "window_w") == 0) {
-            cfg->window_w = atoi(val);
+            cfg->window_w = (int)strtol(val, NULL, 10);
         } else if (strcmp(key, "window_h") == 0) {
-            cfg->window_h = atoi(val);
+            cfg->window_h = (int)strtol(val, NULL, 10);
         } else if (strcmp(key, "panel_visible") == 0) {
-            cfg->panel_visible = atoi(val);
+            cfg->panel_visible = (int)strtol(val, NULL, 10);
         }
     }
 

@@ -296,10 +296,10 @@ int main(int argc, char **argv)
 
     if (npos >= 4) {
         /* Full mode: center + target from CLI */
-        center_lat = atof(argv[1]);
-        center_lon = atof(argv[2]);
-        target_lat = atof(argv[3]);
-        target_lon = atof(argv[4]);
+        center_lat = strtod(argv[1], NULL);
+        center_lon = strtod(argv[2], NULL);
+        target_lat = strtod(argv[3], NULL);
+        target_lon = strtod(argv[4], NULL);
         opt_start = 5;
         cli_center_given = 1;
     } else if (npos >= 2 && has_config) {
@@ -308,8 +308,8 @@ int main(int argc, char **argv)
         center_lon = cfg.lon;
         if (cfg.name[0])
             center_name = cfg.name;
-        target_lat = atof(argv[1]);
-        target_lon = atof(argv[2]);
+        target_lat = strtod(argv[1], NULL);
+        target_lon = strtod(argv[2], NULL);
         opt_start = 3;
     } else if (npos == 0 && has_config && cfg.target_valid) {
         /* Zero-arg mode: center from config, target from saved state */
@@ -594,7 +594,7 @@ int main(int argc, char **argv)
 
     /* Named pipe for IPC (swl dashboard → azMap target updates) */
     #define FIFO_PATH "/tmp/azmap-target.fifo"
-    mkfifo(FIFO_PATH, 0666); /* no-op if already exists */
+    mkfifo(FIFO_PATH, 0600); /* no-op if already exists */
     int fifo_fd = open(FIFO_PATH, O_RDWR | O_NONBLOCK);
     /* O_RDWR keeps fd alive even when writer closes */
     char fifo_buf[512];
@@ -640,6 +640,7 @@ int main(int argc, char **argv)
                                 parse_station_detail(&ui, pipe + 1);
                             } else {
                                 strncpy(new_name, p, sizeof(new_name) - 1);
+                                new_name[sizeof(new_name) - 1] = '\0';
                             }
                         }
                         /* Update target */

@@ -333,8 +333,11 @@ int spore_parse_json(const char *json_str, MufData *m)
         cJSON *lon = cJSON_GetObjectItem(station, "longitude");
         if (!lat || !lon) continue;
 
-        double dlat = cJSON_IsNumber(lat) ? lat->valuedouble : atof(lat->valuestring);
-        double dlon = cJSON_IsNumber(lon) ? lon->valuedouble : atof(lon->valuestring);
+        double dlat = cJSON_IsNumber(lat) ? lat->valuedouble
+                    : (cJSON_IsString(lat) ? strtod(lat->valuestring, NULL) : 0.0);
+        double dlon = cJSON_IsNumber(lon) ? lon->valuedouble
+                    : (cJSON_IsString(lon) ? strtod(lon->valuestring, NULL) : 0.0);
+        if (dlat < -90.0 || dlat > 90.0 || dlon < -360.0 || dlon > 360.0) continue;
         /* Convert 0-360 longitude to -180..+180 */
         if (dlon > 180.0) dlon -= 360.0;
 
@@ -661,13 +664,16 @@ int aurora_parse_json(const char *json_str, AuroraGrid *g)
     cJSON *triplet;
     cJSON_ArrayForEach(triplet, coords) {
         if (!cJSON_IsArray(triplet) || cJSON_GetArraySize(triplet) < 3) continue;
-        int lon = (int)cJSON_GetArrayItem(triplet, 0)->valuedouble;
-        int lat = (int)cJSON_GetArrayItem(triplet, 1)->valuedouble;
-        int val = (int)cJSON_GetArrayItem(triplet, 2)->valuedouble;
+        cJSON *j0 = cJSON_GetArrayItem(triplet, 0);
+        cJSON *j1 = cJSON_GetArrayItem(triplet, 1);
+        cJSON *j2 = cJSON_GetArrayItem(triplet, 2);
+        if (!j0 || !j1 || !j2) continue;
+        int lon = (int)j0->valuedouble;
+        int lat = (int)j1->valuedouble;
+        int val = (int)j2->valuedouble;
 
         /* Normalize lon to 0-359 */
-        if (lon < 0) lon += 360;
-        if (lon >= 360) lon -= 360;
+        lon = ((lon % 360) + 360) % 360;
         int lat_idx = lat + 90;
         if (lat_idx < 0 || lat_idx > 180 || lon < 0 || lon >= 360) continue;
         g->values[lon * 181 + lat_idx] = val;
