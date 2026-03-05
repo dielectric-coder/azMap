@@ -707,9 +707,9 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         glDrawArrays(GL_TRIANGLE_FAN, 0, r->center_marker_vcount);
     }
 
-    /* Target marker - red outline circle */
+    /* Target marker - white outline circle */
     if (r->target_marker_vao) {
-        glUniform4f(r->color_loc, 1.0f, 0.3f, 0.2f, 1.0f);
+        glUniform4f(r->color_loc, 1.0f, 1.0f, 1.0f, 1.0f);
         glBindVertexArray(r->target_marker_vao);
         glDrawArrays(GL_LINE_LOOP, 0, r->target_marker_vcount);
     }

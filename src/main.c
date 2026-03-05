@@ -753,9 +753,9 @@ int main(int argc, char **argv)
             ui.buttons[btn_proj].x = margin;
             ui.buttons[btn_proj].y = margin;
 
-            /* Home button: bottom-center of map */
-            ui.buttons[btn_home].x = ((float)map_fb_w - ui.buttons[btn_home].w) * 0.5f;
-            ui.buttons[btn_home].y = (float)fb_h - bh - margin;
+            /* Home button: below Proj button */
+            ui.buttons[btn_home].x = margin;
+            ui.buttons[btn_home].y = margin + bh + 6.0f;
 
             /* Sidebar buttons: positioned in full-window framebuffer coords.
              * Layout from bottom up:
@@ -1070,7 +1070,12 @@ int main(int argc, char **argv)
                     renderer.muf_num_segments = 0;
                 }
             } else if (ui.clicked == btn_home) {
-                ui_hide_popup(&ui);
+                /* Recenter map on original location, keep zoom level */
+                input.center_lat = input.original_center_lat;
+                input.center_lon = input.original_center_lon;
+                input.center_dirty = 1;
+                cam.pan_x = 0.0f;
+                cam.pan_y = 0.0f;
             }
             ui.clicked = -1;
         }
