@@ -141,3 +141,71 @@ void grid_build_geo(MapData *md)
         if (in_seg == 1) md->vertex_count--;
     }
 }
+
+#define DIST_CIRCLE_PTS 90  /* points per distance circle */
+
+/* Compute destination point given start lat/lon (radians), distance (km), and bearing (radians). */
+static void geo_destination(double lat1, double lon1, double dist_km, double bearing,
+                            double *lat2, double *lon2)
+{
+    double d = dist_km / EARTH_RADIUS_KM;
+    double sd = sin(d), cd = cos(d);
+    double slat = sin(lat1), clat = cos(lat1);
+    *lat2 = asin(slat * cd + clat * sd * cos(bearing));
+    *lon2 = lon1 + atan2(sin(bearing) * sd * clat, cd - slat * sin(*lat2));
+}
+
+void grid_build_dist_circles(MapData *md, double center_lat, double center_lon)
+{
+    md->vertex_count = 0;
+    md->num_segments = 0;
+
+    double max_dist = EARTH_MAX_PROJ_RADIUS; /* ~20015 km */
+    int num_circles = (int)(max_dist / DIST_CIRCLE_STEP_KM);
+    int max_verts = num_circles * (DIST_CIRCLE_PTS + 1);
+
+    free(md->vertices);
+    md->vertices = malloc(max_verts * 2 * sizeof(float));
+    if (!md->vertices) return;
+
+    double clat = center_lat * M_PI / 180.0;
+    double clon = center_lon * M_PI / 180.0;
+
+    for (int ri = 1; ri <= num_circles; ri++) {
+        double dist_km = ri * DIST_CIRCLE_STEP_KM;
+        int seg_start = md->vertex_count;
+        int in_seg = 0;
+
+        for (int i = 0; i <= DIST_CIRCLE_PTS; i++) {
+            double bearing = 2.0 * M_PI * i / DIST_CIRCLE_PTS;
+            double dlat, dlon;
+            geo_destination(clat, clon, dist_km, bearing, &dlat, &dlon);
+
+            double lat_deg = dlat * 180.0 / M_PI;
+            double lon_deg = dlon * 180.0 / M_PI;
+            double x, y;
+            int rc = projection_forward(lat_deg, lon_deg, &x, &y);
+            if (rc < 0) {
+                if (in_seg >= 2 && md->num_segments < MAX_SEGMENTS) {
+                    md->segment_starts[md->num_segments] = seg_start;
+                    md->segment_counts[md->num_segments] = in_seg;
+                    md->num_segments++;
+                }
+                if (in_seg == 1) md->vertex_count--;
+                in_seg = 0;
+                seg_start = md->vertex_count;
+                continue;
+            }
+            md->vertices[md->vertex_count * 2]     = (float)x;
+            md->vertices[md->vertex_count * 2 + 1] = (float)y;
+            md->vertex_count++;
+            in_seg++;
+        }
+        if (in_seg >= 2 && md->num_segments < MAX_SEGMENTS) {
+            md->segment_starts[md->num_segments] = seg_start;
+            md->segment_counts[md->num_segments] = in_seg;
+            md->num_segments++;
+        }
+        if (in_seg == 1) md->vertex_count--;
+    }
+}

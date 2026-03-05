@@ -7,6 +7,7 @@
 #define AURORA_URL "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json"
 #define KP_URL     "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
 #define BZ_URL     "https://services.swpc.noaa.gov/products/summary/solar-wind-mag-field.json"
+#define DRAP_URL   "https://services.swpc.noaa.gov/text/drap_global_frequencies.txt"
 
 #define MUF_MAX_SEGMENTS 256
 #define MUF_MAX_LEGEND   16
@@ -68,6 +69,21 @@ int   aurora_parse_json(const char *json_str, AuroraGrid *g);
 void  aurora_mesh_init(AuroraMesh *m);
 void  aurora_mesh_free(AuroraMesh *m);
 void  aurora_mesh_build(AuroraMesh *m, const AuroraGrid *g);
+
+/* DRAP grid (D-Region Absorption Prediction — HAF in MHz) */
+#define DRAP_GRID_ROWS 90   /* lat: 89 to -89, step -2 */
+#define DRAP_GRID_COLS 90   /* lon: -178 to 178, step 4 */
+
+typedef struct {
+    float *values;     /* HAF in MHz, row-major [row * DRAP_GRID_COLS + col] */
+    float  peak_mhz;  /* peak HAF value across the grid */
+    int    valid;
+} DrapGrid;
+
+void  drap_grid_init(DrapGrid *g);
+void  drap_grid_free(DrapGrid *g);
+int   drap_parse_text(const char *text, DrapGrid *g);
+void  drap_mesh_build(AuroraMesh *m, const DrapGrid *g);
 
 /* Geomagnetic indices (Kp + Bz) */
 typedef struct {

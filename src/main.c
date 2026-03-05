@@ -488,6 +488,11 @@ int main(int argc, char **argv)
     else
         grid_build(&grid);
 
+    /* Distance circles from center */
+    MapData dist_circles;
+    memset(&dist_circles, 0, sizeof(dist_circles));
+    grid_build_dist_circles(&dist_circles, center_lat, center_lon);
+
     /* Night overlay */
     NightMesh nightmesh;
     nightmesh_init(&nightmesh);
@@ -501,13 +506,18 @@ int main(int argc, char **argv)
     aurora_grid_init(&aurora_grid);
     AuroraMesh aurora_mesh;
     aurora_mesh_init(&aurora_mesh);
-    FetchRequest muf_fetch, aurora_fetch, spore_fetch;
+    DrapGrid drap_grid;
+    drap_grid_init(&drap_grid);
+    AuroraMesh drap_mesh;
+    aurora_mesh_init(&drap_mesh);
+    FetchRequest muf_fetch, aurora_fetch, spore_fetch, drap_fetch;
     memset(&muf_fetch, 0, sizeof(muf_fetch));
     memset(&aurora_fetch, 0, sizeof(aurora_fetch));
     memset(&spore_fetch, 0, sizeof(spore_fetch));
-    int muf_active = 0, aurora_active = 0, spore_active = 0;
-    int muf_fetching = 0, aurora_fetching = 0, spore_fetching = 0;
-    time_t last_muf_fetch = 0, last_aurora_fetch = 0, last_spore_fetch = 0;
+    memset(&drap_fetch, 0, sizeof(drap_fetch));
+    int muf_active = 0, aurora_active = 0, spore_active = 0, drap_active = 0;
+    int muf_fetching = 0, aurora_fetching = 0, spore_fetching = 0, drap_fetching = 0;
+    time_t last_muf_fetch = 0, last_aurora_fetch = 0, last_spore_fetch = 0, last_drap_fetch = 0;
     GeomagIndices geomag;
     geomag_init(&geomag);
     FetchRequest kp_fetch, bz_fetch;
@@ -523,6 +533,7 @@ int main(int argc, char **argv)
     if (has_land)
         renderer_upload_land(&renderer, &land);
     renderer_upload_grid(&renderer, &grid);
+    renderer_upload_dist_circles(&renderer, &dist_circles);
     {
         float gc_verts[GC_LINE_POINTS * 2];
         int gc_n = build_gc_line(center_lat, center_lon, target_lat, target_lon, gc_verts);
@@ -549,9 +560,10 @@ int main(int argc, char **argv)
     int btn_home    = ui_add_button(&ui, "HOME",   0, 0, 80, 28);
     int btn_proj    = ui_add_button(&ui, "PROJ",   0, 0, 80, 28);
     /* Sidebar buttons — layers row */
-    int btn_aurora = ui_add_button(&ui, "Aurora",  0, 0, 80, 28);
-    int btn_spore  = ui_add_button(&ui, "E's",     0, 0, 80, 28);
-    int btn_muf    = ui_add_button(&ui, "MUF",     0, 0, 80, 28);
+    int btn_aurora = ui_add_button(&ui, "Aurora",  0, 0, 68, 28);
+    int btn_spore  = ui_add_button(&ui, "E's",     0, 0, 52, 28);
+    int btn_muf    = ui_add_button(&ui, "MUF",     0, 0, 56, 28);
+    int btn_drap   = ui_add_button(&ui, "DRAP",    0, 0, 60, 28);
     /* Sidebar buttons — mode row */
     int btn_opt1 = ui_add_button(&ui, "QRZ",  0, 0, 80, 28);
     int btn_opt2 = ui_add_button(&ui, "DIGI", 0, 0, 80, 28);
@@ -680,6 +692,9 @@ int main(int argc, char **argv)
                 grid_build_geo(&grid);
                 renderer_upload_grid(&renderer, &grid);
             }
+            /* Distance circles depend on projection center */
+            grid_build_dist_circles(&dist_circles, center_lat, center_lon);
+            renderer_upload_dist_circles(&renderer, &dist_circles);
             last_sun_update = 0; /* force night mesh rebuild */
             /* Reproject overlays */
             if (muf_active && muf_data.raw_count > 0) {
@@ -693,6 +708,10 @@ int main(int argc, char **argv)
             if (aurora_active && aurora_grid.valid) {
                 aurora_mesh_build(&aurora_mesh, &aurora_grid);
                 renderer_upload_aurora(&renderer, &aurora_mesh);
+            }
+            if (drap_active && drap_grid.valid) {
+                drap_mesh_build(&drap_mesh, &drap_grid);
+                renderer_upload_drap(&renderer, &drap_mesh);
             }
         }
 
@@ -753,6 +772,48 @@ int main(int argc, char **argv)
         int tbg = (dist > 0.0) ? build_label_bg(tlx, tly, tw, label_size, pad, bg_verts + cbg * 2) : 0;
         renderer_upload_label_bgs(&renderer, bg_verts, cbg + tbg, cbg);
 
+        /* Distance circle labels — positioned at the top of each circle */
+        {
+            float dl_verts[4096];
+            int dl_count = 0;
+            double max_dist_km = EARTH_MAX_PROJ_RADIUS;
+            int num_dc = (int)(max_dist_km / DIST_CIRCLE_STEP_KM);
+            float dl_size = 11.0f;
+
+            /* For AZEQ, the top of each circle is at (0, -radius) in km-space.
+             * For ORTHO, compute the destination point at bearing=0 (north). */
+            double clat_r = center_lat * M_PI / 180.0;
+            double clon_r = center_lon * M_PI / 180.0;
+
+            for (int ri = 1; ri <= num_dc; ri++) {
+                double dkm = ri * DIST_CIRCLE_STEP_KM;
+                /* Compute geographic point due north at this distance */
+                double d = dkm / EARTH_RADIUS_KM;
+                double lat2 = asin(sin(clat_r) * cos(d) + cos(clat_r) * sin(d));
+                double lon2 = clon_r + atan2(0.0, cos(d) - sin(clat_r) * sin(lat2));
+                double px_km, py_km;
+                if (projection_forward(lat2 * 180.0 / M_PI, lon2 * 180.0 / M_PI,
+                                       &px_km, &py_km) < 0)
+                    continue;
+
+                float spx, spy;
+                km_to_pixel(mvp, (float)px_km, (float)py_km, map_fb_w, fb_h, &spx, &spy);
+
+                /* Format label: "5000 km", "10000 km", etc. */
+                char dlbl[32];
+                snprintf(dlbl, sizeof(dlbl), "%d km", (int)dkm);
+                float lw = text_width(dlbl, dl_size);
+                float lx = spx - lw * 0.5f;
+                float ly = spy - dl_size * 0.3f;
+
+                int nv = text_build(dlbl, lx, ly, dl_size,
+                                    dl_verts + dl_count * 2,
+                                    (int)(sizeof(dl_verts) / (2 * sizeof(float))) - dl_count);
+                dl_count += nv;
+            }
+            renderer_upload_dist_labels(&renderer, dl_verts, dl_count);
+        }
+
         /* Update button positions */
         {
             float bh = BUTTON_HEIGHT, margin = 10.0f;
@@ -797,14 +858,14 @@ int main(int argc, char **argv)
                 ui.section_modes_y = by - line_gap - 2.0f; /* line Y (full-window) */
                 ui.section_modes_label_y = ui.section_modes_y - label_h - 8.0f;
 
-                /* Upper row: Aurora, Spor.E, MUF (LAYERS section) */
+                /* Upper row: Aurora, Spor.E, MUF, DRAP (LAYERS section) */
                 by = ui.section_modes_label_y - section_gap - bh;
-                int upper_btns[] = { btn_aurora, btn_spore, btn_muf };
+                int upper_btns[] = { btn_aurora, btn_spore, btn_muf, btn_drap };
                 row_w = 0;
-                for (int i = 0; i < 3; i++) row_w += ui.buttons[upper_btns[i]].w;
-                row_w += 2 * sb_gap;
+                for (int i = 0; i < 4; i++) row_w += ui.buttons[upper_btns[i]].w;
+                row_w += 3 * sb_gap;
                 rx = sb_left + (sbw - row_w) * 0.5f;
-                for (int i = 0; i < 3; i++) {
+                for (int i = 0; i < 4; i++) {
                     ui.buttons[upper_btns[i]].x = rx;
                     ui.buttons[upper_btns[i]].y = by;
                     rx += ui.buttons[upper_btns[i]].w + sb_gap;
@@ -866,7 +927,8 @@ int main(int argc, char **argv)
                 int have_legend = (muf_active && muf_data.legend_count > 0);
                 int have_spore_legend = (spore_active && spore_data.legend_count > 0);
                 int have_geomag = (aurora_active && geomag.valid);
-                if (have_legend || have_spore_legend || have_geomag) {
+                int have_drap = (drap_active && drap_grid.valid);
+                if (have_legend || have_spore_legend || have_geomag || have_drap) {
                     float leg_sz = 14.0f;
                     float swatch_w = 24.0f;
                     float gap = 6.0f;
@@ -943,11 +1005,11 @@ int main(int argc, char **argv)
                     if (have_spore_legend) {
                         LEG_ENTRIES(spore_data);
                         LEG_HEADER("foEs");
-                        if (have_geomag)
+                        if (have_geomag || have_drap)
                             leg_y -= section_gap;
                     }
 
-                    /* Kp/Bz indices (top section) */
+                    /* Kp/Bz indices */
                     if (have_geomag) {
                         char kp_label[32], bz_label[32];
                         snprintf(kp_label, sizeof(kp_label), "Kp %.1f",
@@ -964,6 +1026,21 @@ int main(int argc, char **argv)
                         leg_y -= leg_line_h;
 
                         LEG_HEADER("GEOMAG");
+                        if (have_drap)
+                            leg_y -= section_gap;
+                    }
+
+                    /* DRAP absorption (top section) */
+                    if (have_drap) {
+                        char haf_label[32];
+                        snprintf(haf_label, sizeof(haf_label), "HAF %.1f MHz",
+                                 (double)drap_grid.peak_mhz);
+                        ltvc += text_build(haf_label, leg_left, leg_y,
+                                           leg_sz, leg_text_verts + ltvc * 2,
+                                           2048 - ltvc);
+                        leg_y -= leg_line_h;
+
+                        LEG_HEADER("DRAP");
                     }
 
                     #undef LEG_ENTRIES
@@ -986,7 +1063,8 @@ int main(int argc, char **argv)
                     if ((bi == btn_proj && projection_get_mode() == PROJ_ORTHO) ||
                         (bi == btn_aurora && aurora_active) ||
                         (bi == btn_spore && spore_active) ||
-                        (bi == btn_muf && muf_active))
+                        (bi == btn_muf && muf_active) ||
+                        (bi == btn_drap && drap_active))
                         active_mask |= (1u << vis);
                     vis++;
                 }
@@ -1042,6 +1120,9 @@ int main(int argc, char **argv)
                 else
                     grid_build(&grid);
                 renderer_upload_grid(&renderer, &grid);
+                /* Rebuild distance circles for new mode */
+                grid_build_dist_circles(&dist_circles, center_lat, center_lon);
+                renderer_upload_dist_circles(&renderer, &dist_circles);
                 /* Rebuild earth circle and disc */
                 renderer_upload_earth_circle(&renderer, projection_get_radius());
                 /* Force night mesh rebuild */
@@ -1058,6 +1139,10 @@ int main(int argc, char **argv)
                 if (aurora_active && aurora_grid.valid) {
                     aurora_mesh_build(&aurora_mesh, &aurora_grid);
                     renderer_upload_aurora(&renderer, &aurora_mesh);
+                }
+                if (drap_active && drap_grid.valid) {
+                    drap_mesh_build(&drap_mesh, &drap_grid);
+                    renderer_upload_drap(&renderer, &drap_mesh);
                 }
                 /* Clamp zoom */
                 double max_diam = 2.0 * projection_get_radius();
@@ -1136,6 +1221,20 @@ int main(int argc, char **argv)
                     }
                 } else {
                     renderer.spore_num_segments = 0;
+                }
+            } else if (ui.clicked == btn_drap) {
+                drap_active = !drap_active;
+                if (drap_active) {
+                    if (drap_grid.valid) {
+                        drap_mesh_build(&drap_mesh, &drap_grid);
+                        renderer_upload_drap(&renderer, &drap_mesh);
+                    } else if (!drap_fetching) {
+                        fetch_start(&drap_fetch, DRAP_URL);
+                        drap_fetching = 1;
+                        last_drap_fetch = time(NULL);
+                    }
+                } else {
+                    renderer.drap_vertex_count = 0;
                 }
             } else if (ui.clicked == btn_home) {
                 /* Recenter map on original location, keep zoom level */
@@ -1368,6 +1467,26 @@ int main(int argc, char **argv)
                 }
             }
 
+            /* Poll DRAP fetch completion */
+            if (drap_fetching) {
+                int s = fetch_check(&drap_fetch);
+                if (s != 0) {
+                    drap_fetching = 0;
+                    if (s == 1) {
+                        char *text = fetch_take_response(&drap_fetch);
+                        if (text) {
+                            drap_parse_text(text, &drap_grid);
+                            free(text);
+                            if (drap_active && drap_grid.valid) {
+                                drap_mesh_build(&drap_mesh, &drap_grid);
+                                renderer_upload_drap(&renderer, &drap_mesh);
+                            }
+                        }
+                    }
+                    fetch_cleanup(&drap_fetch);
+                }
+            }
+
             /* Auto-refresh every OVERLAY_UPDATE_SEC while active */
             if (muf_active && !muf_fetching &&
                 now - last_muf_fetch >= OVERLAY_UPDATE_SEC) {
@@ -1386,6 +1505,12 @@ int main(int argc, char **argv)
                 fetch_start(&aurora_fetch, AURORA_URL);
                 aurora_fetching = 1;
                 last_aurora_fetch = now;
+            }
+            if (drap_active && !drap_fetching &&
+                now - last_drap_fetch >= OVERLAY_UPDATE_SEC) {
+                fetch_start(&drap_fetch, DRAP_URL);
+                drap_fetching = 1;
+                last_drap_fetch = now;
             }
 
             /* Poll Kp/Bz fetch completion */
@@ -1461,6 +1586,7 @@ int main(int argc, char **argv)
     if (muf_fetching) fetch_cleanup(&muf_fetch);
     if (spore_fetching) fetch_cleanup(&spore_fetch);
     if (aurora_fetching) fetch_cleanup(&aurora_fetch);
+    if (drap_fetching) fetch_cleanup(&drap_fetch);
     if (kp_fetching) fetch_cleanup(&kp_fetch);
     if (bz_fetching) fetch_cleanup(&bz_fetch);
 
@@ -1471,11 +1597,14 @@ int main(int argc, char **argv)
     if (has_borders) map_data_free(&borders);
     if (has_land) map_data_free(&land);
     free(grid.vertices);
+    free(dist_circles.vertices);
     nightmesh_free(&nightmesh);
     muf_data_free(&muf_data);
     muf_data_free(&spore_data);
     aurora_grid_free(&aurora_grid);
     aurora_mesh_free(&aurora_mesh);
+    drap_grid_free(&drap_grid);
+    aurora_mesh_free(&drap_mesh);
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

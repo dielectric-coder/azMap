@@ -827,6 +827,249 @@ void aurora_mesh_build(AuroraMesh *m, const AuroraGrid *g)
     free(alpha_grid);
 }
 
+/* ── DRAP (D-Region Absorption Prediction) ─────────────────────── */
+
+void drap_grid_init(DrapGrid *g)
+{
+    g->values = NULL;
+    g->peak_mhz = 0.0f;
+    g->valid = 0;
+}
+
+void drap_grid_free(DrapGrid *g)
+{
+    free(g->values);
+    g->values = NULL;
+    g->peak_mhz = 0.0f;
+    g->valid = 0;
+}
+
+int drap_parse_text(const char *text, DrapGrid *g)
+{
+    if (!text) return -1;
+
+    int grid_sz = DRAP_GRID_ROWS * DRAP_GRID_COLS;
+    if (!g->values) {
+        g->values = malloc(grid_sz * sizeof(float));
+        if (!g->values) return -1;
+    }
+    memset(g->values, 0, grid_sz * sizeof(float));
+
+    const char *p = text;
+    int row = 0;
+
+    while (*p && row < DRAP_GRID_ROWS) {
+        /* Skip to start of line */
+        while (*p == ' ' || *p == '\t') p++;
+
+        /* Skip comment lines */
+        if (*p == '#') {
+            while (*p && *p != '\n') p++;
+            if (*p == '\n') p++;
+            continue;
+        }
+        /* Skip empty lines */
+        if (*p == '\n') { p++; continue; }
+        if (*p == '\0') break;
+
+        /* First non-comment line is the longitude header — skip it */
+        /* Detect: first token is not a number with optional sign that looks like a latitude */
+        char *end;
+        double first = strtod(p, &end);
+        if (end == p) {
+            /* Not a number, skip line */
+            while (*p && *p != '\n') p++;
+            if (*p == '\n') p++;
+            continue;
+        }
+
+        /* Longitude header: first value is a longitude (typically -178),
+         * data rows: first value is a latitude (89, 87, ..., -89).
+         * Latitude of row 0 is 89. We detect the header by checking
+         * if we haven't started collecting rows yet AND the first value
+         * looks like -178 (a longitude, not 89). */
+        if (row == 0 && first < -90.0) {
+            /* This is the longitude header, skip */
+            while (*p && *p != '\n') p++;
+            if (*p == '\n') p++;
+            continue;
+        }
+
+        /* Data row: latitude | frequency values */
+        /* Skip the latitude value */
+        p = end;
+
+        /* Skip optional pipe delimiter */
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '|') p++;
+
+        /* Read frequency values */
+        int col = 0;
+        while (*p && *p != '\n' && col < DRAP_GRID_COLS) {
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p == '\n' || *p == '\0') break;
+            float val = (float)strtod(p, &end);
+            if (end == p) break;
+            p = end;
+            g->values[row * DRAP_GRID_COLS + col] = val;
+            col++;
+        }
+
+        row++;
+        /* Skip to next line */
+        while (*p && *p != '\n') p++;
+        if (*p == '\n') p++;
+    }
+
+    if (row < DRAP_GRID_ROWS) return -1;
+
+    /* Find peak */
+    g->peak_mhz = 0.0f;
+    for (int i = 0; i < grid_sz; i++) {
+        if (g->values[i] > g->peak_mhz)
+            g->peak_mhz = g->values[i];
+    }
+
+    g->valid = 1;
+    return 0;
+}
+
+/* Bilinear lookup of DRAP HAF at lat/lon, returns alpha 0-1 */
+static float drap_lookup(const DrapGrid *g, double lat, double lon)
+{
+    /* Normalize longitude to -178..178 range */
+    if (lon > 180.0) lon -= 360.0;
+    if (lon < -180.0) lon += 360.0;
+
+    /* Grid indices (continuous) */
+    double col_f = (lon - (-178.0)) / 4.0;
+    double row_f = (89.0 - lat) / 2.0;
+
+    /* Clamp to grid bounds */
+    if (col_f < 0.0) col_f = 0.0;
+    if (col_f > DRAP_GRID_COLS - 1.001) col_f = DRAP_GRID_COLS - 1.001;
+    if (row_f < 0.0) row_f = 0.0;
+    if (row_f > DRAP_GRID_ROWS - 1.001) row_f = DRAP_GRID_ROWS - 1.001;
+
+    int c0 = (int)col_f, r0 = (int)row_f;
+    int c1 = c0 + 1, r1 = r0 + 1;
+    if (c1 >= DRAP_GRID_COLS) c1 = DRAP_GRID_COLS - 1;
+    if (r1 >= DRAP_GRID_ROWS) r1 = DRAP_GRID_ROWS - 1;
+
+    float fc = (float)(col_f - c0);
+    float fr = (float)(row_f - r0);
+
+    float v00 = g->values[r0 * DRAP_GRID_COLS + c0];
+    float v10 = g->values[r0 * DRAP_GRID_COLS + c1];
+    float v01 = g->values[r1 * DRAP_GRID_COLS + c0];
+    float v11 = g->values[r1 * DRAP_GRID_COLS + c1];
+
+    float val = v00 * (1 - fc) * (1 - fr) + v10 * fc * (1 - fr)
+              + v01 * (1 - fc) * fr + v11 * fc * fr;
+
+    /* Map HAF (MHz) to alpha:
+     * 0-0.5 → 0 (baseline noise, ignore)
+     * 0.5-3 → ramp 0.0 to 0.2  (quiet-time absorption)
+     * 3-10  → ramp 0.2 to 0.45 (moderate event)
+     * 10-30 → ramp 0.45 to 0.7 (major event / blackout) */
+    if (val <= 0.5f) return 0.0f;
+    if (val <= 3.0f) return (val - 0.5f) / 2.5f * 0.2f;
+    if (val <= 10.0f) return 0.2f + (val - 3.0f) / 7.0f * 0.25f;
+    return 0.45f + (val - 10.0f) / 20.0f * 0.25f;
+}
+
+void drap_mesh_build(AuroraMesh *m, const DrapGrid *g)
+{
+    if (!g || !g->valid || !m->vertices) return;
+
+    #define DRAP_ANGULAR_DIVS  180
+    #define DRAP_RADIAL_DIVS    60
+
+    double max_r = projection_get_radius() - 0.5;
+    float dr = (float)(max_r / DRAP_RADIAL_DIVS);
+    float da = 2.0f * (float)M_PI / DRAP_ANGULAR_DIVS;
+
+    m->vertex_count = 0;
+
+    /* Precompute alpha grid */
+    int rows = DRAP_RADIAL_DIVS + 1;
+    int cols = DRAP_ANGULAR_DIVS;
+    float *alpha_grid = malloc(rows * cols * sizeof(float));
+    if (!alpha_grid) return;
+
+    for (int ri = 0; ri <= DRAP_RADIAL_DIVS; ri++) {
+        float r = ri * dr;
+        for (int ai = 0; ai < DRAP_ANGULAR_DIVS; ai++) {
+            float a = ai * da;
+            float x = r * cosf(a);
+            float y = r * sinf(a);
+            float av = 0.0f;
+
+            double lat, lon;
+            if (ri == 0) {
+                if (projection_inverse(0.0, 0.0, &lat, &lon) == 0)
+                    av = drap_lookup(g, lat, lon);
+            } else {
+                if (projection_inverse((double)x, (double)y, &lat, &lon) == 0)
+                    av = drap_lookup(g, lat, lon);
+            }
+            alpha_grid[ri * cols + ai] = av;
+        }
+    }
+
+    /* Generate triangles — same pattern as aurora/nightmesh */
+    float center_alpha = alpha_grid[0];
+
+    for (int ai = 0; ai < DRAP_ANGULAR_DIVS; ai++) {
+        int ai_next = (ai + 1) % DRAP_ANGULAR_DIVS;
+        float a0 = ai * da;
+        float a1 = (ai + 1) * da;
+
+        /* Inner ring */
+        {
+            float a_v0 = center_alpha;
+            float a_v1 = alpha_grid[1 * cols + ai];
+            float a_v2 = alpha_grid[1 * cols + ai_next];
+            if (a_v0 > 0.0f || a_v1 > 0.0f || a_v2 > 0.0f) {
+                float r1 = dr;
+                aurora_emit(m, 0.0f, 0.0f, a_v0);
+                aurora_emit(m, r1 * cosf(a0), r1 * sinf(a0), a_v1);
+                aurora_emit(m, r1 * cosf(a1), r1 * sinf(a1), a_v2);
+            }
+        }
+
+        /* Outer rings */
+        for (int ri = 1; ri < DRAP_RADIAL_DIVS; ri++) {
+            float r0 = ri * dr;
+            float r1 = (ri + 1) * dr;
+
+            float cos_a0 = cosf(a0), sin_a0 = sinf(a0);
+            float cos_a1 = cosf(a1), sin_a1 = sinf(a1);
+
+            float a00 = alpha_grid[ri * cols + ai];
+            float a01 = alpha_grid[ri * cols + ai_next];
+            float a10 = alpha_grid[(ri + 1) * cols + ai];
+            float a11 = alpha_grid[(ri + 1) * cols + ai_next];
+
+            if (a00 == 0.0f && a01 == 0.0f && a10 == 0.0f && a11 == 0.0f)
+                continue;
+
+            aurora_emit(m, r0 * cos_a0, r0 * sin_a0, a00);
+            aurora_emit(m, r1 * cos_a0, r1 * sin_a0, a10);
+            aurora_emit(m, r1 * cos_a1, r1 * sin_a1, a11);
+
+            aurora_emit(m, r0 * cos_a0, r0 * sin_a0, a00);
+            aurora_emit(m, r1 * cos_a1, r1 * sin_a1, a11);
+            aurora_emit(m, r0 * cos_a1, r0 * sin_a1, a01);
+        }
+    }
+
+    free(alpha_grid);
+
+    #undef DRAP_ANGULAR_DIVS
+    #undef DRAP_RADIAL_DIVS
+}
+
 /* ── Geomagnetic indices (Kp + Bz) ────────────────────────────── */
 
 void geomag_init(GeomagIndices *g)

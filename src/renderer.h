@@ -67,6 +67,18 @@ typedef struct {
     int          grid_segment_counts[MAX_SEGMENTS];
     int          grid_num_segments;
 
+    /* Distance circles from center (km-space) */
+    unsigned int dist_vao;
+    unsigned int dist_vbo;
+    int          dist_segment_starts[MAX_SEGMENTS];
+    int          dist_segment_counts[MAX_SEGMENTS];
+    int          dist_num_segments;
+
+    /* Distance circle labels (pixel-space GL_LINES) */
+    unsigned int dist_label_vao;
+    unsigned int dist_label_vbo;
+    int          dist_label_vertex_count;
+
     /* Night overlay (filled triangles with per-vertex alpha, km-space) */
     unsigned int night_vao;
     unsigned int night_vbo;
@@ -76,6 +88,11 @@ typedef struct {
     unsigned int aurora_vao;
     unsigned int aurora_vbo;
     int          aurora_vertex_count;
+
+    /* DRAP absorption heatmap overlay (filled triangles with per-vertex alpha, km-space) */
+    unsigned int drap_vao;
+    unsigned int drap_vbo;
+    int          drap_vertex_count;
 
     /* MUF legend (pixel-space, colored line segments + text in sidebar) */
     unsigned int legend_line_vao;
@@ -182,11 +199,20 @@ void renderer_upload_earth_circle(Renderer *r, double radius);
 /* Upload grid (graticule) data to GPU. */
 void renderer_upload_grid(Renderer *r, const MapData *md);
 
+/* Upload distance circle geometry to GPU. */
+void renderer_upload_dist_circles(Renderer *r, const MapData *md);
+
+/* Upload distance circle label text to GPU (pixel-space GL_LINES). */
+void renderer_upload_dist_labels(Renderer *r, float *verts, int vertex_count);
+
 /* Upload night overlay mesh (GL_TRIANGLES, 3 floats per vertex: x, y, alpha). */
 void renderer_upload_night(Renderer *r, const float *vertices, int vertex_count);
 
 /* Upload aurora overlay mesh (GL_TRIANGLES, 3 floats per vertex: x, y, alpha). */
 void renderer_upload_aurora(Renderer *r, const AuroraMesh *m);
+
+/* Upload DRAP absorption overlay mesh (same format as aurora). */
+void renderer_upload_drap(Renderer *r, const AuroraMesh *m);
 
 /* Upload MUF contour line data to GPU. */
 void renderer_upload_muf(Renderer *r, const MufData *m);
