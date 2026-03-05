@@ -95,6 +95,14 @@ typedef struct {
     float        muf_segment_colors[MUF_MAX_SEGMENTS][4];
     int          muf_num_segments;
 
+    /* Sporadic E contour lines (per-segment color, km-space) */
+    unsigned int spore_vao;
+    unsigned int spore_vbo;
+    int          spore_segment_starts[MUF_MAX_SEGMENTS];
+    int          spore_segment_counts[MUF_MAX_SEGMENTS];
+    float        spore_segment_colors[MUF_MAX_SEGMENTS][4];
+    int          spore_num_segments;
+
     /* Text overlay (pixel-space, HUD) */
     unsigned int text_vao;
     unsigned int text_vbo;
@@ -182,6 +190,9 @@ void renderer_upload_aurora(Renderer *r, const AuroraMesh *m);
 
 /* Upload MUF contour line data to GPU. */
 void renderer_upload_muf(Renderer *r, const MufData *m);
+
+/* Upload Sporadic E contour line data to GPU. */
+void renderer_upload_spore(Renderer *r, const MufData *m);
 
 /* Upload text overlay vertices (pixel-space GL_LINES). */
 void renderer_upload_text(Renderer *r, float *verts, int vertex_count);

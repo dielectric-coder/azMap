@@ -387,6 +387,28 @@ void renderer_upload_muf(Renderer *r, const MufData *m)
     }
 }
 
+void renderer_upload_spore(Renderer *r, const MufData *m)
+{
+    if (!r->spore_vao) {
+        glGenVertexArrays(1, &r->spore_vao);
+        glGenBuffers(1, &r->spore_vbo);
+    }
+    glBindVertexArray(r->spore_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, r->spore_vbo);
+    glBufferData(GL_ARRAY_BUFFER, m->vertex_count * 2 * sizeof(float),
+                 m->vertices, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    glBindVertexArray(0);
+
+    r->spore_num_segments = m->num_segments;
+    for (int i = 0; i < m->num_segments; i++) {
+        r->spore_segment_starts[i] = m->segment_starts[i];
+        r->spore_segment_counts[i] = m->segment_counts[i];
+        memcpy(r->spore_segment_colors[i], m->segment_colors[i], 4 * sizeof(float));
+    }
+}
+
 void renderer_upload_labels(Renderer *r, float *verts, int vertex_count, int split)
 {
     if (!r->label_vao) {
@@ -693,6 +715,27 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
         }
     }
 
+    /* Sporadic E contour lines — thicker, semi-transparent (diffused look) */
+    if (r->spore_vao && r->spore_num_segments > 0) {
+        glVertexAttrib1f(1, 1.0f);
+        glBindVertexArray(r->spore_vao);
+        /* Draw a wide translucent glow, then a bright core */
+        for (int pass = 0; pass < 2; pass++) {
+            glLineWidth(pass == 0 ? 6.0f : 2.0f);
+            float alpha = pass == 0 ? 0.35f : 1.0f;
+            for (int i = 0; i < r->spore_num_segments; i++) {
+                float c[4] = { r->spore_segment_colors[i][0],
+                                r->spore_segment_colors[i][1],
+                                r->spore_segment_colors[i][2],
+                                alpha };
+                glUniform4fv(r->color_loc, 1, c);
+                glDrawArrays(GL_LINE_STRIP, r->spore_segment_starts[i],
+                             r->spore_segment_counts[i]);
+            }
+        }
+        glLineWidth(1.5f); /* restore default */
+    }
+
     /* Target line - yellow (great circle path) */
     if (r->line_vao && r->line_vertex_count > 1) {
         glUniform4f(r->color_loc, 1.0f, 0.9f, 0.2f, 1.0f);
@@ -950,6 +993,7 @@ void renderer_destroy(Renderer *r)
     if (r->night_vao) { glDeleteVertexArrays(1, &r->night_vao); glDeleteBuffers(1, &r->night_vbo); }
     if (r->aurora_vao) { glDeleteVertexArrays(1, &r->aurora_vao); glDeleteBuffers(1, &r->aurora_vbo); }
     if (r->muf_vao) { glDeleteVertexArrays(1, &r->muf_vao); glDeleteBuffers(1, &r->muf_vbo); }
+    if (r->spore_vao) { glDeleteVertexArrays(1, &r->spore_vao); glDeleteBuffers(1, &r->spore_vbo); }
     if (r->legend_line_vao) { glDeleteVertexArrays(1, &r->legend_line_vao); glDeleteBuffers(1, &r->legend_line_vbo); }
     if (r->legend_text_vao) { glDeleteVertexArrays(1, &r->legend_text_vao); glDeleteBuffers(1, &r->legend_text_vbo); }
     if (r->text_vao) { glDeleteVertexArrays(1, &r->text_vao); glDeleteBuffers(1, &r->text_vbo); }

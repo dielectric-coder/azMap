@@ -3,11 +3,12 @@
 
 #define OVERLAY_UPDATE_SEC  900  /* 15 minutes */
 #define MUF_URL    "https://prop.kc2g.com/renders/current/mufd-normal-now.geojson"
+#define SPORE_URL  "https://prop.kc2g.com/api/stations.json"
 #define AURORA_URL "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json"
 #define KP_URL     "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
 #define BZ_URL     "https://services.swpc.noaa.gov/products/summary/solar-wind-mag-field.json"
 
-#define MUF_MAX_SEGMENTS 128
+#define MUF_MAX_SEGMENTS 256
 #define MUF_MAX_LEGEND   16
 
 /* MUF legend entry: MHz level + color */
@@ -57,6 +58,8 @@ void  muf_data_init(MufData *m);
 void  muf_data_free(MufData *m);
 int   muf_parse_geojson(const char *json_str, MufData *m);
 void  muf_reproject(MufData *m);
+
+int   spore_parse_json(const char *json_str, MufData *m);
 
 void  aurora_grid_init(AuroraGrid *g);
 void  aurora_grid_free(AuroraGrid *g);

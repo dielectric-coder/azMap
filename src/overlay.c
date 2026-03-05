@@ -216,6 +216,416 @@ void muf_reproject(MufData *m)
     }
 }
 
+/* ── Sporadic E (foEs) contour overlay ─────────────────────────── */
+
+/* IDW grid dimensions: 2° resolution */
+#define SPORE_GRID_COLS 180   /* -180 to +178 in 2° steps */
+#define SPORE_GRID_ROWS  91   /* -90 to +90 in 2° steps */
+#define SPORE_MAX_STATIONS 200
+#define SPORE_MAX_RADIUS_KM 2500.0
+
+/* Contour levels and colors for foEs */
+static const float spore_levels[] = { 3.0f, 5.0f, 7.0f, 10.0f, 14.0f };
+static const float spore_colors[][4] = {
+    { 0.267f, 0.533f, 1.0f, 1.0f },  /* 3 MHz  #4488ff blue   */
+    { 0.267f, 0.8f,   0.267f, 1.0f }, /* 5 MHz  #44cc44 green  */
+    { 0.8f,   0.8f,   0.0f,   1.0f }, /* 7 MHz  #cccc00 yellow */
+    { 1.0f,   0.533f, 0.0f,   1.0f }, /* 10 MHz #ff8800 orange */
+    { 1.0f,   0.133f, 0.133f, 1.0f }, /* 14 MHz #ff2222 red    */
+};
+#define SPORE_NUM_LEVELS 5
+
+/* Haversine distance in km (inlined for IDW loop performance) */
+static double spore_dist_km(double lat1, double lon1, double lat2, double lon2)
+{
+    double dlat = (lat2 - lat1) * M_PI / 180.0;
+    double dlon = (lon2 - lon1) * M_PI / 180.0;
+    double a = sin(dlat / 2);
+    double b = sin(dlon / 2);
+    a = a * a + cos(lat1 * M_PI / 180.0) * cos(lat2 * M_PI / 180.0) * b * b;
+    return 2.0 * 6371.0 * asin(sqrt(a));
+}
+
+/* Marching squares edge table: for each of the 16 cases, pairs of edges to connect.
+ * Edges: 0=bottom, 1=right, 2=top, 3=left. -1 terminates. */
+static const int ms_edges[16][5] = {
+    { -1, -1, -1, -1, -1 },  /* 0000 */
+    {  3,  0, -1, -1, -1 },  /* 0001 */
+    {  0,  1, -1, -1, -1 },  /* 0010 */
+    {  3,  1, -1, -1, -1 },  /* 0011 */
+    {  1,  2, -1, -1, -1 },  /* 0100 */
+    { -1, -1, -1, -1, -1 },  /* 0101 saddle — skip */
+    {  0,  2, -1, -1, -1 },  /* 0110 */
+    {  3,  2, -1, -1, -1 },  /* 0111 */
+    {  2,  3, -1, -1, -1 },  /* 1000 */
+    {  2,  0, -1, -1, -1 },  /* 1001 */
+    { -1, -1, -1, -1, -1 },  /* 1010 saddle — skip */
+    {  2,  1, -1, -1, -1 },  /* 1011 */
+    {  1,  3, -1, -1, -1 },  /* 1100 */
+    {  1,  0, -1, -1, -1 },  /* 1101 */
+    {  0,  3, -1, -1, -1 },  /* 1110 */
+    { -1, -1, -1, -1, -1 },  /* 1111 */
+};
+
+/* Interpolate edge crossing position. Returns lat,lon of the crossing point. */
+static void ms_edge_interp(int edge, int r, int c,
+                            float v00, float v10, float v01, float v11,
+                            float level, double *lat, double *lon)
+{
+    /* Grid cell corners in lat/lon:
+     * (r,c)=bottom-left  (r,c+1)=bottom-right
+     * (r+1,c)=top-left   (r+1,c+1)=top-right */
+    double lat0 = -90.0 + r * 2.0;
+    double lat1 = lat0 + 2.0;
+    double lon0 = -180.0 + c * 2.0;
+    double lon1 = lon0 + 2.0;
+
+    float t;
+    switch (edge) {
+    case 0: /* bottom: (r,c)→(r,c+1) */
+        t = (v00 == v10) ? 0.5f : (level - v00) / (v10 - v00);
+        *lat = lat0;
+        *lon = lon0 + t * 2.0;
+        break;
+    case 1: /* right: (r,c+1)→(r+1,c+1) */
+        t = (v10 == v11) ? 0.5f : (level - v10) / (v11 - v10);
+        *lat = lat0 + t * 2.0;
+        *lon = lon1;
+        break;
+    case 2: /* top: (r+1,c)→(r+1,c+1) */
+        t = (v01 == v11) ? 0.5f : (level - v01) / (v11 - v01);
+        *lat = lat1;
+        *lon = lon0 + t * 2.0;
+        break;
+    case 3: /* left: (r,c)→(r+1,c) */
+        t = (v00 == v01) ? 0.5f : (level - v00) / (v01 - v00);
+        *lat = lat0 + t * 2.0;
+        *lon = lon0;
+        break;
+    default:
+        *lat = lat0;
+        *lon = lon0;
+        break;
+    }
+}
+
+int spore_parse_json(const char *json_str, MufData *m)
+{
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root || !cJSON_IsArray(root)) { cJSON_Delete(root); return -1; }
+
+    /* Extract stations with valid foEs */
+    double sta_lat[SPORE_MAX_STATIONS], sta_lon[SPORE_MAX_STATIONS];
+    float sta_foes[SPORE_MAX_STATIONS];
+    int nsta = 0;
+
+    cJSON *item;
+    cJSON_ArrayForEach(item, root) {
+        if (nsta >= SPORE_MAX_STATIONS) break;
+        cJSON *foes = cJSON_GetObjectItem(item, "foes");
+        if (!foes || cJSON_IsNull(foes) || !cJSON_IsNumber(foes)) continue;
+        if (foes->valuedouble <= 0.0) continue;
+
+        /* lat/lon are inside nested "station" object, as strings, lon in 0-360 */
+        cJSON *station = cJSON_GetObjectItem(item, "station");
+        if (!station) continue;
+        cJSON *lat = cJSON_GetObjectItem(station, "latitude");
+        cJSON *lon = cJSON_GetObjectItem(station, "longitude");
+        if (!lat || !lon) continue;
+
+        double dlat = cJSON_IsNumber(lat) ? lat->valuedouble : atof(lat->valuestring);
+        double dlon = cJSON_IsNumber(lon) ? lon->valuedouble : atof(lon->valuestring);
+        /* Convert 0-360 longitude to -180..+180 */
+        if (dlon > 180.0) dlon -= 360.0;
+
+        sta_lat[nsta] = dlat;
+        sta_lon[nsta] = dlon;
+        sta_foes[nsta] = (float)foes->valuedouble;
+        nsta++;
+    }
+    cJSON_Delete(root);
+
+    if (nsta < 3) return -1; /* not enough data */
+
+    /* IDW interpolation to regular grid */
+    int grid_sz = SPORE_GRID_ROWS * SPORE_GRID_COLS;
+    float *grid = malloc(grid_sz * sizeof(float));
+    int *grid_valid = calloc(grid_sz, sizeof(int));
+    if (!grid || !grid_valid) { free(grid); free(grid_valid); return -1; }
+
+    for (int r = 0; r < SPORE_GRID_ROWS; r++) {
+        double glat = -90.0 + r * 2.0;
+        for (int c = 0; c < SPORE_GRID_COLS; c++) {
+            double glon = -180.0 + c * 2.0;
+            double wsum = 0.0, vsum = 0.0;
+            int in_range = 0;
+
+            for (int s = 0; s < nsta; s++) {
+                double d = spore_dist_km(glat, glon, sta_lat[s], sta_lon[s]);
+                if (d > SPORE_MAX_RADIUS_KM) continue;
+                if (d < 1.0) d = 1.0; /* avoid div by zero */
+                double w = 1.0 / (d * d);
+                wsum += w;
+                vsum += w * sta_foes[s];
+                in_range = 1;
+            }
+
+            int idx = r * SPORE_GRID_COLS + c;
+            if (in_range) {
+                grid[idx] = (float)(vsum / wsum);
+                grid_valid[idx] = 1;
+            } else {
+                grid[idx] = 0.0f;
+            }
+        }
+    }
+
+    /* Marching squares: collect raw edge segments, then chain into polylines */
+    #define MS_MAX_FRAGS 8000
+    typedef struct { double lat[2], lon[2]; } MsFrag;
+    MsFrag *frags = malloc(MS_MAX_FRAGS * sizeof(MsFrag));
+    if (!frags) { free(grid); free(grid_valid); return -1; }
+
+    /* Temporary output buffers — sized for chained polylines */
+    int max_pts = 60000;
+    double *lats = malloc(max_pts * sizeof(double));
+    double *lons = malloc(max_pts * sizeof(double));
+    if (!lats || !lons) { free(grid); free(grid_valid); free(frags); free(lats); free(lons); return -1; }
+
+    free(m->raw_lats);
+    free(m->raw_lons);
+    m->raw_lats = lats;
+    m->raw_lons = lons;
+    m->raw_count = 0;
+    m->raw_num_segments = 0;
+    m->legend_count = 0;
+
+    for (int li = 0; li < SPORE_NUM_LEVELS; li++) {
+        float level = spore_levels[li];
+
+        /* Add legend entry */
+        if (m->legend_count < MUF_MAX_LEGEND) {
+            m->legend[m->legend_count].mhz = level;
+            memcpy(m->legend[m->legend_count].color, spore_colors[li], sizeof(float) * 4);
+            m->legend_count++;
+        }
+
+        /* Phase 1: collect all edge-crossing fragments for this level */
+        int nfrags = 0;
+        for (int r = 0; r < SPORE_GRID_ROWS - 1; r++) {
+            for (int c = 0; c < SPORE_GRID_COLS - 1; c++) {
+                int i00 = r * SPORE_GRID_COLS + c;
+                int i10 = r * SPORE_GRID_COLS + c + 1;
+                int i01 = (r + 1) * SPORE_GRID_COLS + c;
+                int i11 = (r + 1) * SPORE_GRID_COLS + c + 1;
+
+                if (!grid_valid[i00] || !grid_valid[i10] ||
+                    !grid_valid[i01] || !grid_valid[i11]) continue;
+
+                float v00 = grid[i00], v10 = grid[i10];
+                float v01 = grid[i01], v11 = grid[i11];
+
+                int ci = 0;
+                if (v00 >= level) ci |= 1;
+                if (v10 >= level) ci |= 2;
+                if (v11 >= level) ci |= 4;
+                if (v01 >= level) ci |= 8;
+
+                /* Saddle cases: disambiguate using cell center average */
+                if (ci == 5 || ci == 10) {
+                    float center = (v00 + v10 + v01 + v11) * 0.25f;
+                    int center_above = (center >= level);
+                    if (ci == 5) {
+                        /* 0101: BL and TR above */
+                        if (center_above) {
+                            /* Connect: left→top, bottom→right (two segments) */
+                            if (nfrags + 1 < MS_MAX_FRAGS) {
+                                ms_edge_interp(3, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                                ms_edge_interp(2, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                                nfrags++;
+                                ms_edge_interp(0, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                                ms_edge_interp(1, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                                nfrags++;
+                            }
+                        } else {
+                            /* Connect: left→bottom, top→right */
+                            if (nfrags + 1 < MS_MAX_FRAGS) {
+                                ms_edge_interp(3, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                                ms_edge_interp(0, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                                nfrags++;
+                                ms_edge_interp(2, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                                ms_edge_interp(1, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                                nfrags++;
+                            }
+                        }
+                    } else { /* ci == 10: BR and TL above */
+                        if (center_above) {
+                            if (nfrags + 1 < MS_MAX_FRAGS) {
+                                ms_edge_interp(0, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                                ms_edge_interp(3, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                                nfrags++;
+                                ms_edge_interp(1, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                                ms_edge_interp(2, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                                nfrags++;
+                            }
+                        } else {
+                            if (nfrags + 1 < MS_MAX_FRAGS) {
+                                ms_edge_interp(0, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                                ms_edge_interp(1, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                                nfrags++;
+                                ms_edge_interp(2, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                                ms_edge_interp(3, r, c, v00, v10, v01, v11, level,
+                                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                                nfrags++;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                if (ms_edges[ci][0] < 0) continue;
+                if (nfrags >= MS_MAX_FRAGS) break;
+
+                ms_edge_interp(ms_edges[ci][0], r, c, v00, v10, v01, v11, level,
+                               &frags[nfrags].lat[0], &frags[nfrags].lon[0]);
+                ms_edge_interp(ms_edges[ci][1], r, c, v00, v10, v01, v11, level,
+                               &frags[nfrags].lat[1], &frags[nfrags].lon[1]);
+                nfrags++;
+            }
+        }
+
+        /* Phase 2: chain fragments into polylines.
+         * Two fragment endpoints match if they are within half a grid cell. */
+        #define MS_EPS 1.01  /* slightly over 1° — half of 2° grid */
+        int *used = calloc(nfrags, sizeof(int));
+        if (!used) continue;
+
+        for (int seed = 0; seed < nfrags; seed++) {
+            if (used[seed]) continue;
+            if (m->raw_num_segments >= MUF_MAX_SEGMENTS) break;
+
+            /* Start a new chain from this fragment */
+            used[seed] = 1;
+            int seg_start = m->raw_count;
+
+            /* Add seed's two points */
+            if (m->raw_count + 2 > max_pts) break;
+            lats[m->raw_count] = frags[seed].lat[0];
+            lons[m->raw_count] = frags[seed].lon[0];
+            m->raw_count++;
+            lats[m->raw_count] = frags[seed].lat[1];
+            lons[m->raw_count] = frags[seed].lon[1];
+            m->raw_count++;
+
+            /* Extend forward (match tail) */
+            int found;
+            do {
+                found = 0;
+                double tlat = lats[m->raw_count - 1];
+                double tlon = lons[m->raw_count - 1];
+                for (int f = 0; f < nfrags; f++) {
+                    if (used[f]) continue;
+                    if (m->raw_count + 1 > max_pts) break;
+                    /* Try matching fragment's start to our tail */
+                    if (fabs(frags[f].lat[0] - tlat) < MS_EPS &&
+                        fabs(frags[f].lon[0] - tlon) < MS_EPS) {
+                        lats[m->raw_count] = frags[f].lat[1];
+                        lons[m->raw_count] = frags[f].lon[1];
+                        m->raw_count++;
+                        used[f] = 1;
+                        found = 1;
+                        break;
+                    }
+                    /* Try matching fragment's end to our tail (reverse) */
+                    if (fabs(frags[f].lat[1] - tlat) < MS_EPS &&
+                        fabs(frags[f].lon[1] - tlon) < MS_EPS) {
+                        lats[m->raw_count] = frags[f].lat[0];
+                        lons[m->raw_count] = frags[f].lon[0];
+                        m->raw_count++;
+                        used[f] = 1;
+                        found = 1;
+                        break;
+                    }
+                }
+            } while (found);
+
+            /* Extend backward (match head) */
+            do {
+                found = 0;
+                double hlat = lats[seg_start];
+                double hlon = lons[seg_start];
+                for (int f = 0; f < nfrags; f++) {
+                    if (used[f]) continue;
+                    double append_lat, append_lon;
+                    int matched = 0;
+                    if (fabs(frags[f].lat[1] - hlat) < MS_EPS &&
+                        fabs(frags[f].lon[1] - hlon) < MS_EPS) {
+                        append_lat = frags[f].lat[0];
+                        append_lon = frags[f].lon[0];
+                        matched = 1;
+                    } else if (fabs(frags[f].lat[0] - hlat) < MS_EPS &&
+                               fabs(frags[f].lon[0] - hlon) < MS_EPS) {
+                        append_lat = frags[f].lat[1];
+                        append_lon = frags[f].lon[1];
+                        matched = 1;
+                    }
+                    if (matched) {
+                        if (m->raw_count + 1 > max_pts) break;
+                        /* Shift everything right by 1 to prepend */
+                        int chain_len = m->raw_count - seg_start;
+                        memmove(&lats[seg_start + 1], &lats[seg_start],
+                                chain_len * sizeof(double));
+                        memmove(&lons[seg_start + 1], &lons[seg_start],
+                                chain_len * sizeof(double));
+                        lats[seg_start] = append_lat;
+                        lons[seg_start] = append_lon;
+                        m->raw_count++;
+                        used[f] = 1;
+                        found = 1;
+                        break;
+                    }
+                }
+            } while (found);
+
+            int seg_len = m->raw_count - seg_start;
+            if (seg_len >= 2 && m->raw_num_segments < MUF_MAX_SEGMENTS) {
+                int si = m->raw_num_segments;
+                m->raw_seg_starts[si] = seg_start;
+                m->raw_seg_counts[si] = seg_len;
+                memcpy(m->raw_seg_colors[si], spore_colors[li], sizeof(float) * 4);
+                m->raw_num_segments++;
+            }
+        }
+
+        free(used);
+        #undef MS_EPS
+    }
+
+    free(frags);
+    free(grid_valid);
+    free(grid);
+    #undef MS_MAX_FRAGS
+
+    /* Project into km-space */
+    muf_reproject(m);
+    return 0;
+}
+
 /* ── Aurora heatmap ────────────────────────────────────────────── */
 
 void aurora_grid_init(AuroraGrid *g)

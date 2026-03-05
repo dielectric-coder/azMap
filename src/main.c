@@ -492,19 +492,22 @@ int main(int argc, char **argv)
     NightMesh nightmesh;
     nightmesh_init(&nightmesh);
 
-    /* MUF / Aurora overlays */
+    /* MUF / Aurora / Sporadic E overlays */
     MufData muf_data;
     muf_data_init(&muf_data);
+    MufData spore_data;
+    muf_data_init(&spore_data);
     AuroraGrid aurora_grid;
     aurora_grid_init(&aurora_grid);
     AuroraMesh aurora_mesh;
     aurora_mesh_init(&aurora_mesh);
-    FetchRequest muf_fetch, aurora_fetch;
+    FetchRequest muf_fetch, aurora_fetch, spore_fetch;
     memset(&muf_fetch, 0, sizeof(muf_fetch));
     memset(&aurora_fetch, 0, sizeof(aurora_fetch));
-    int muf_active = 0, aurora_active = 0;
-    int muf_fetching = 0, aurora_fetching = 0;
-    time_t last_muf_fetch = 0, last_aurora_fetch = 0;
+    memset(&spore_fetch, 0, sizeof(spore_fetch));
+    int muf_active = 0, aurora_active = 0, spore_active = 0;
+    int muf_fetching = 0, aurora_fetching = 0, spore_fetching = 0;
+    time_t last_muf_fetch = 0, last_aurora_fetch = 0, last_spore_fetch = 0;
     GeomagIndices geomag;
     geomag_init(&geomag);
     FetchRequest kp_fetch, bz_fetch;
@@ -543,16 +546,16 @@ int main(int argc, char **argv)
     /* Parse -d detail string: "station|freq|country|site|lang|target" */
     if (detail_arg)
         parse_station_detail(&ui, detail_arg);
-    int btn_home    = ui_add_button(&ui, "Home",   0, 0, 80, 28);
-    int btn_proj    = ui_add_button(&ui, "Proj",   0, 0, 80, 28);
+    int btn_home    = ui_add_button(&ui, "HOME",   0, 0, 80, 28);
+    int btn_proj    = ui_add_button(&ui, "PROJ",   0, 0, 80, 28);
     /* Sidebar buttons — layers row */
     int btn_aurora = ui_add_button(&ui, "Aurora",  0, 0, 80, 28);
-    int btn_spore  = ui_add_button(&ui, "Spor.E",  0, 0, 80, 28);
+    int btn_spore  = ui_add_button(&ui, "E's",     0, 0, 80, 28);
     int btn_muf    = ui_add_button(&ui, "MUF",     0, 0, 80, 28);
     /* Sidebar buttons — mode row */
     int btn_opt1 = ui_add_button(&ui, "QRZ",  0, 0, 80, 28);
-    int btn_opt2 = ui_add_button(&ui, "WSJT", 0, 0, 80, 28);
-    int btn_opt3 = ui_add_button(&ui, "BCB",  0, 0, 80, 28);
+    int btn_opt2 = ui_add_button(&ui, "DIGI", 0, 0, 80, 28);
+    int btn_opt3 = ui_add_button(&ui, "SWL",  0, 0, 80, 28);
 
     /* Camera — use actual framebuffer size (differs from window size on HiDPI) */
     Camera cam;
@@ -681,6 +684,10 @@ int main(int argc, char **argv)
             if (muf_active && muf_data.raw_count > 0) {
                 muf_reproject(&muf_data);
                 renderer_upload_muf(&renderer, &muf_data);
+            }
+            if (spore_active && spore_data.raw_count > 0) {
+                muf_reproject(&spore_data);
+                renderer_upload_spore(&renderer, &spore_data);
             }
             if (aurora_active && aurora_grid.valid) {
                 aurora_mesh_build(&aurora_mesh, &aurora_grid);
@@ -854,10 +861,11 @@ int main(int argc, char **argv)
                 btn_text[li+3] = ui.section_modes_y;
                 text_count += 2;
 
-                /* MUF contour legend above LAYERS label */
+                /* MUF / Spor.E contour legend above LAYERS label */
                 int have_legend = (muf_active && muf_data.legend_count > 0);
+                int have_spore_legend = (spore_active && spore_data.legend_count > 0);
                 int have_geomag = (aurora_active && geomag.valid);
-                if (have_legend || have_geomag) {
+                if (have_legend || have_spore_legend || have_geomag) {
                     float leg_sz = 14.0f;
                     float swatch_w = 24.0f;
                     float gap = 6.0f;
@@ -870,54 +878,95 @@ int main(int argc, char **argv)
                     float leg_left = sb_left + line_inset;
                     float leg_y = ui.section_layers_label_y - leg_sz - 18.0f;
 
-                    /* MUF legend entries */
+                    float section_gap = leg_line_h * 1.5f;
+                    float leg_right = sb_left + sbw - line_inset;
+
+                    /* Macro: separator line then title (drawn bottom-to-top,
+                     * so separator is below the title visually) */
+                    #define LEG_HEADER(title) do { \
+                        if (ltvc + 2 <= 2048) { \
+                            leg_text_verts[ltvc * 2]     = leg_left; \
+                            leg_text_verts[ltvc * 2 + 1] = leg_y + leg_line_h * 0.4f; \
+                            ltvc++; \
+                            leg_text_verts[ltvc * 2]     = leg_right; \
+                            leg_text_verts[ltvc * 2 + 1] = leg_y + leg_line_h * 0.4f; \
+                            ltvc++; \
+                        } \
+                        leg_y -= leg_line_h * 0.6f; \
+                        ltvc += text_build((title), leg_left, leg_y, \
+                                           leg_sz, leg_text_verts + ltvc * 2, \
+                                           2048 - ltvc); \
+                        leg_y -= leg_line_h * 1.2f; \
+                    } while(0)
+
+                    /* Emit colored swatch + MHz label for each legend entry */
+                    #define LEG_ENTRIES(data) do { \
+                        for (int ei = 0; ei < (data).legend_count; ei++) { \
+                            char label[16]; \
+                            if ((data).legend[ei].mhz == (int)(data).legend[ei].mhz) \
+                                snprintf(label, sizeof(label), "%.0f MHz", \
+                                         (double)(data).legend[ei].mhz); \
+                            else \
+                                snprintf(label, sizeof(label), "%.1f MHz", \
+                                         (double)(data).legend[ei].mhz); \
+                            int vi = (nc + ei) * 4; \
+                            if (vi + 3 < MUF_MAX_LEGEND * 4) { \
+                                leg_line_verts[vi + 0] = leg_left; \
+                                leg_line_verts[vi + 1] = leg_y + leg_sz * 0.5f; \
+                                leg_line_verts[vi + 2] = leg_left + swatch_w; \
+                                leg_line_verts[vi + 3] = leg_y + leg_sz * 0.5f; \
+                                memcpy(leg_colors[nc + ei], (data).legend[ei].color, \
+                                       sizeof(float) * 4); \
+                            } \
+                            ltvc += text_build(label, leg_left + swatch_w + gap, leg_y, \
+                                               leg_sz, leg_text_verts + ltvc * 2, \
+                                               2048 - ltvc); \
+                            leg_y -= leg_line_h; \
+                        } \
+                        nc += (data).legend_count; \
+                    } while(0)
+
+                    /* Sections build bottom-to-top (leg_y decreases = moves up).
+                     * Within each section: entries first (bottom), then header (top).
+                     * Section order: MUF (bottom), foEs (middle), GEOMAG (top). */
+
+                    /* MUF legend entries (bottom section, closest to LAYERS) */
                     if (have_legend) {
-                        nc = muf_data.legend_count;
-                        for (int ei = nc - 1; ei >= 0; ei--) {
-                            char label[16];
-                            if (muf_data.legend[ei].mhz == (int)muf_data.legend[ei].mhz)
-                                snprintf(label, sizeof(label), "%.0f MHz",
-                                         (double)muf_data.legend[ei].mhz);
-                            else
-                                snprintf(label, sizeof(label), "%.1f MHz",
-                                         (double)muf_data.legend[ei].mhz);
-
-                            /* Colored swatch line (left-aligned) */
-                            int vi = ei * 4;
-                            leg_line_verts[vi + 0] = leg_left;
-                            leg_line_verts[vi + 1] = leg_y + leg_sz * 0.5f;
-                            leg_line_verts[vi + 2] = leg_left + swatch_w;
-                            leg_line_verts[vi + 3] = leg_y + leg_sz * 0.5f;
-                            memcpy(leg_colors[ei], muf_data.legend[ei].color, sizeof(float) * 4);
-
-                            /* Text label */
-                            ltvc += text_build(label, leg_left + swatch_w + gap, leg_y,
-                                               leg_sz, leg_text_verts + ltvc * 2,
-                                               2048 - ltvc);
-                            leg_y -= leg_line_h;
-                        }
+                        LEG_ENTRIES(muf_data);
+                        LEG_HEADER("MUF");
+                        if (have_spore_legend || have_geomag)
+                            leg_y -= section_gap;
                     }
 
-                    /* Kp/Bz indices (right side of sidebar) */
+                    /* Sporadic E legend entries (middle section) */
+                    if (have_spore_legend) {
+                        LEG_ENTRIES(spore_data);
+                        LEG_HEADER("foEs");
+                        if (have_geomag)
+                            leg_y -= section_gap;
+                    }
+
+                    /* Kp/Bz indices (top section) */
                     if (have_geomag) {
-                        float geo_right = sb_left + sbw - line_inset;
-                        float geo_y = ui.section_layers_label_y - leg_sz - 18.0f;
                         char kp_label[32], bz_label[32];
                         snprintf(kp_label, sizeof(kp_label), "Kp %.1f",
                                  (double)geomag.kp);
                         snprintf(bz_label, sizeof(bz_label), "Bz %.1f nT",
                                  (double)geomag.bz);
-                        /* Right-align: position text so it ends at geo_right */
-                        float kp_w = text_width(kp_label, leg_sz);
-                        ltvc += text_build(kp_label, geo_right - kp_w, geo_y,
+                        ltvc += text_build(bz_label, leg_left, leg_y,
                                            leg_sz, leg_text_verts + ltvc * 2,
                                            2048 - ltvc);
-                        geo_y -= leg_line_h;
-                        float bz_w = text_width(bz_label, leg_sz);
-                        ltvc += text_build(bz_label, geo_right - bz_w, geo_y,
+                        leg_y -= leg_line_h;
+                        ltvc += text_build(kp_label, leg_left, leg_y,
                                            leg_sz, leg_text_verts + ltvc * 2,
                                            2048 - ltvc);
+                        leg_y -= leg_line_h;
+
+                        LEG_HEADER("GEOMAG");
                     }
+
+                    #undef LEG_ENTRIES
+                    #undef LEG_HEADER
 
                     renderer_upload_legend(&renderer, leg_line_verts, leg_colors,
                                            nc, leg_text_verts, ltvc);
@@ -935,6 +984,7 @@ int main(int argc, char **argv)
                     if (!ui.buttons[bi].visible) continue;
                     if ((bi == btn_proj && projection_get_mode() == PROJ_ORTHO) ||
                         (bi == btn_aurora && aurora_active) ||
+                        (bi == btn_spore && spore_active) ||
                         (bi == btn_muf && muf_active))
                         active_mask |= (1u << vis);
                     vis++;
@@ -999,6 +1049,10 @@ int main(int argc, char **argv)
                 if (muf_active && muf_data.raw_count > 0) {
                     muf_reproject(&muf_data);
                     renderer_upload_muf(&renderer, &muf_data);
+                }
+                if (spore_active && spore_data.raw_count > 0) {
+                    muf_reproject(&spore_data);
+                    renderer_upload_spore(&renderer, &spore_data);
                 }
                 if (aurora_active && aurora_grid.valid) {
                     aurora_mesh_build(&aurora_mesh, &aurora_grid);
@@ -1068,6 +1122,19 @@ int main(int argc, char **argv)
                     }
                 } else {
                     renderer.muf_num_segments = 0;
+                }
+            } else if (ui.clicked == btn_spore) {
+                spore_active = !spore_active;
+                if (spore_active) {
+                    if (spore_data.raw_count > 0) {
+                        renderer_upload_spore(&renderer, &spore_data);
+                    } else if (!spore_fetching) {
+                        fetch_start(&spore_fetch, SPORE_URL);
+                        spore_fetching = 1;
+                        last_spore_fetch = time(NULL);
+                    }
+                } else {
+                    renderer.spore_num_segments = 0;
                 }
             } else if (ui.clicked == btn_home) {
                 /* Recenter map on original location, keep zoom level */
@@ -1260,6 +1327,26 @@ int main(int argc, char **argv)
                 }
             }
 
+            /* Poll Sporadic E fetch completion */
+            if (spore_fetching) {
+                int s = fetch_check(&spore_fetch);
+                if (s != 0) {
+                    spore_fetching = 0;
+                    if (s == 1) {
+                        char *json = fetch_take_response(&spore_fetch);
+                        if (json) {
+                            muf_data_free(&spore_data);
+                            muf_data_init(&spore_data);
+                            spore_parse_json(json, &spore_data);
+                            free(json);
+                            if (spore_active && spore_data.num_segments > 0)
+                                renderer_upload_spore(&renderer, &spore_data);
+                        }
+                    }
+                    fetch_cleanup(&spore_fetch);
+                }
+            }
+
             /* Poll aurora fetch completion */
             if (aurora_fetching) {
                 int s = fetch_check(&aurora_fetch);
@@ -1286,6 +1373,12 @@ int main(int argc, char **argv)
                 fetch_start(&muf_fetch, MUF_URL);
                 muf_fetching = 1;
                 last_muf_fetch = now;
+            }
+            if (spore_active && !spore_fetching &&
+                now - last_spore_fetch >= OVERLAY_UPDATE_SEC) {
+                fetch_start(&spore_fetch, SPORE_URL);
+                spore_fetching = 1;
+                last_spore_fetch = now;
             }
             if (aurora_active && !aurora_fetching &&
                 now - last_aurora_fetch >= OVERLAY_UPDATE_SEC) {
@@ -1363,6 +1456,13 @@ int main(int argc, char **argv)
     if (fifo_fd >= 0) close(fifo_fd);
     unlink(FIFO_PATH);
 
+    /* Cleanup in-flight fetches */
+    if (muf_fetching) fetch_cleanup(&muf_fetch);
+    if (spore_fetching) fetch_cleanup(&spore_fetch);
+    if (aurora_fetching) fetch_cleanup(&aurora_fetch);
+    if (kp_fetching) fetch_cleanup(&kp_fetch);
+    if (bz_fetching) fetch_cleanup(&bz_fetch);
+
     /* Cleanup */
     if (has_qrz) qrz_cleanup();
     renderer_destroy(&renderer);
@@ -1372,6 +1472,7 @@ int main(int argc, char **argv)
     free(grid.vertices);
     nightmesh_free(&nightmesh);
     muf_data_free(&muf_data);
+    muf_data_free(&spore_data);
     aurora_grid_free(&aurora_grid);
     aurora_mesh_free(&aurora_mesh);
     glfwDestroyWindow(window);
