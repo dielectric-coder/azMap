@@ -1,3 +1,11 @@
+/* map_data.c — Shapefile loading, projection, and boundary clipping.
+ *
+ * Two reprojection strategies:
+ * - project_all(): splits segments at large projected-space jumps (for lines)
+ * - project_nosplit(): clips polygon rings at the projection boundary using
+ *   bisection, then inserts arc segments along the boundary circle (for
+ *   stencil-based polygon fill) */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +14,7 @@
 #include "map_data.h"
 #include "projection.h"
 
+/* Load raw lat/lon vertices from a shapefile into md->raw_* fields. */
 static int load_raw(MapData *md, const char *shp_path)
 {
     SHPHandle shp = SHPOpen(shp_path, "rb");

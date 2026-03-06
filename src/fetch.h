@@ -1,3 +1,10 @@
+/* fetch.h — Threaded non-blocking HTTP GET via libcurl + pthread.
+ *
+ * Each FetchRequest spawns a detached thread that performs an HTTP GET.
+ * The main loop polls fetch_check() each frame; when done, it takes
+ * ownership of the response string.  Used by all overlay data sources
+ * (MUF, Sporadic E, Aurora, DRAP, Kp/Bz) for async refresh. */
+
 #ifndef FETCH_H
 #define FETCH_H
 

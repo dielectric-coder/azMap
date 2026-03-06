@@ -1,3 +1,10 @@
+/* input.h — GLFW input callbacks: scroll zoom, mouse drag pan, keyboard shortcuts.
+ *
+ * Installs GLFW callbacks for scroll (zoom), mouse drag (map panning or popup
+ * dragging), keyboard (arrow keys pan, R resets, Q/Esc quits), and character
+ * input (popup text entry).  Tracks the current projection center lat/lon and
+ * signals the main loop via center_dirty when it changes. */
+
 #ifndef INPUT_H
 #define INPUT_H
 

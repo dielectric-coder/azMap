@@ -1,3 +1,9 @@
+/* solar.h — Subsolar point and solar zenith angle calculations.
+ *
+ * Computes the geographic point directly under the Sun for a given UTC time
+ * (simplified declination model) and the solar zenith angle at any lat/lon.
+ * Used by the day/night overlay to determine per-vertex shading. */
+
 #ifndef SOLAR_H
 #define SOLAR_H
 

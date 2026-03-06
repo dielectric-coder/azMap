@@ -1,3 +1,11 @@
+/* text.c — Built-in vector stroke font.
+ *
+ * Each glyph is defined as up to 8 line segments in a normalized 0–1 cell
+ * (origin top-left, y-down).  text_build() scales and positions glyphs into
+ * pixel-space GL_LINES vertex pairs.  The G() macro provides a compact DSL
+ * for glyph definitions.  Extended ASCII bytes (like °) are mapped to '^'
+ * which renders as a small square (degree symbol). */
+
 #include "text.h"
 #include <string.h>
 #include <ctype.h>

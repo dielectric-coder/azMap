@@ -1,9 +1,17 @@
+/* input.c — GLFW input callbacks for zoom, pan, keyboard, and text entry.
+ *
+ * Uses a module-level g_input pointer (set by input_init) since GLFW
+ * callbacks don't support user data pointers.  Mouse drag converts pixel
+ * deltas to lat/lon changes via the Mercator-like formula (adjusted for
+ * cos(lat) longitude scaling).  Keyboard arrows pan proportionally to
+ * the current zoom level. */
+
 #include "input.h"
 #include "projection.h"
 #include <math.h>
 #include <ctype.h>
 
-static InputState *g_input = NULL;
+static InputState *g_input = NULL;  /* module-global, set by input_init() */
 
 static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
 {

@@ -1,3 +1,10 @@
+/* grid.h — Grid geometry generation (graticules and distance circles).
+ *
+ * Generates three types of grid overlays:
+ * - AZEQ mode: concentric range rings (5000 km step) + radial azimuth lines
+ * - ORTHO mode: geographic parallels + meridians through projection_forward()
+ * - Distance circles: great-circle rings at 2000 km intervals from center */
+
 #ifndef GRID_H
 #define GRID_H
 

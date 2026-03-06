@@ -1,3 +1,10 @@
+/* config.h — Configuration file parser and state persistence (~/.config/azmap.conf).
+ *
+ * Loads user preferences (center location, QRZ credentials) and persisted
+ * session state (target, view, window) from a simple key=value file.
+ * Saves session state back using merge-write to preserve comments and
+ * manual entries. */
+
 #ifndef CONFIG_H
 #define CONFIG_H
 

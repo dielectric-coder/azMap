@@ -1,3 +1,13 @@
+/* overlay.h — Radio propagation and space weather overlay data.
+ *
+ * Manages four overlay layers parsed from external data sources:
+ * - MUF contour lines (KC2G GeoJSON, frequency-colored polylines)
+ * - Sporadic E contours (KC2G stations JSON, IDW interpolation + marching squares)
+ * - Aurora heatmap (NOAA OVATION JSON, probability-to-alpha polar mesh)
+ * - DRAP absorption (NOAA SWPC text, HAF-to-alpha polar mesh)
+ * Plus geomagnetic indices (Kp + Bz) for the sidebar legend.
+ * All overlays auto-refresh every 15 minutes via async fetch. */
+
 #ifndef OVERLAY_H
 #define OVERLAY_H
 

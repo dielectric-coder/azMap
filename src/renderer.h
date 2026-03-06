@@ -1,3 +1,12 @@
+/* renderer.h — OpenGL shader management, VAO/VBO upload, and draw calls.
+ *
+ * Owns all GPU resources: a single shader program (map.vert/map.frag) with
+ * uniform color + MVP, and per-layer VAO/VBO pairs for every renderable element.
+ * Upload functions transfer projected vertex data to the GPU; the draw functions
+ * render all layers in back-to-front order with appropriate colors and blend modes.
+ * Drawing is split into km-space (map viewport with MVP) and pixel-space
+ * (UI overlays with orthographic screen matrix). */
+
 #ifndef RENDERER_H
 #define RENDERER_H
 

@@ -1,3 +1,10 @@
+/* nightmesh.h — Day/night overlay mesh generation.
+ *
+ * Generates a polar triangle mesh (180 angular × 60 radial divisions)
+ * covering the Earth disc.  Each vertex carries a per-vertex alpha derived
+ * from the solar zenith angle (transparent in daylight, opaque at night,
+ * smooth gradient through twilight).  Rebuilt every 60 seconds. */
+
 #ifndef NIGHTMESH_H
 #define NIGHTMESH_H
 

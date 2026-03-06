@@ -1,3 +1,10 @@
+/* ui.c — UI geometry generation: buttons, popup panel, text input.
+ *
+ * Builds vertex buffers each frame for the renderer.  Buttons are drawn as
+ * rounded rectangles (fill via triangle fan from center, outline via GL_LINES
+ * around the perimeter).  The popup is a fixed-layout dialog with title bar,
+ * close button, text input field, and result lines. */
+
 #include "ui.h"
 #include "text.h"
 #include <string.h>

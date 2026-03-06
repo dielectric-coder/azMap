@@ -1,3 +1,9 @@
+/* camera.h — Orthographic view state and MVP matrix.
+ *
+ * Manages the 2D view into projected km-space: zoom level (visible diameter
+ * in km), pan offset, and aspect ratio.  Produces a 4x4 column-major
+ * orthographic matrix for OpenGL. */
+
 #ifndef CAMERA_H
 #define CAMERA_H
 

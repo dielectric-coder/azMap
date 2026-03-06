@@ -1,3 +1,11 @@
+/* map_data.h — Shapefile loading and projected vertex management.
+ *
+ * Loads Natural Earth shapefiles (coastlines, borders, land polygons) via
+ * shapelib, stores raw lat/lon, and projects vertices into km-space.
+ * Supports reprojection on center/mode change, with two strategies:
+ * split-at-jumps (for line features) and nosplit with boundary clipping
+ * (for polygon fill via stencil buffer). */
+
 #ifndef MAP_DATA_H
 #define MAP_DATA_H
 

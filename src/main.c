@@ -1,3 +1,14 @@
+/* main.c — Entry point, GLFW window, main loop, CLI arg parsing, label building.
+ *
+ * Sets up the OpenGL window, loads shapefiles & config, parses CLI arguments,
+ * creates the FIFO for IPC, and runs the main render loop.  Each frame:
+ * - polls FIFO for target updates from the swl dashboard
+ * - checks async fetch results for overlay data (MUF, Es, Aurora, DRAP, Kp/Bz)
+ * - handles projection center changes (reprojection of all geometry)
+ * - rebuilds HUD text, labels, and sidebar content
+ * - renders all layers via the renderer
+ * - triggers periodic overlay refresh (every 15 min) and night mesh update (every 60s) */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,3 +1,15 @@
+/* renderer.c — OpenGL shader compilation, VAO/VBO management, and draw calls.
+ *
+ * Uses a single shader program with two uniforms: u_mvp (4x4 matrix) and
+ * u_color (RGBA).  Per-vertex alpha (attribute 1) is used by overlays
+ * (night/aurora/DRAP) for smooth gradients; non-overlay geometry sets it
+ * to 1.0 via glVertexAttrib1f.
+ *
+ * Rendering is split into two coordinate spaces:
+ * - km-space: map geometry transformed by the camera MVP matrix
+ * - pixel-space: UI elements (labels, HUD, buttons, popup, sidebar) using
+ *   a screen-space orthographic matrix (origin top-left, y-down) */
+
 #include <GL/glew.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,6 +18,9 @@
 #include "renderer.h"
 #include "projection.h"
 
+/* ── Shader loading helpers ──────────────────────────────────────── */
+
+/* Read an entire file into a malloc'd string. */
 static char *read_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -25,6 +40,7 @@ static char *read_file(const char *path)
     return buf;
 }
 
+/* Compile a GLSL shader; returns handle or 0 on error. */
 static unsigned int compile_shader(const char *src, GLenum type)
 {
     unsigned int s = glCreateShader(type);
@@ -41,6 +57,8 @@ static unsigned int compile_shader(const char *src, GLenum type)
     }
     return s;
 }
+
+/* ── Initialization ──────────────────────────────────────────────── */
 
 int renderer_init(Renderer *r, const char *shader_dir)
 {
@@ -100,6 +118,10 @@ int renderer_init(Renderer *r, const char *shader_dir)
 
     return 0;
 }
+
+/* ── Geometry upload functions ────────────────────────────────────
+ * Each function creates (or reuses) a VAO/VBO pair, uploads vertex data
+ * with GL_DYNAMIC_DRAW, and copies segment metadata into the Renderer. */
 
 void renderer_upload_map(Renderer *r, const MapData *md)
 {
@@ -651,6 +673,12 @@ void renderer_upload_text(Renderer *r, float *verts, int vertex_count)
     r->text_vertex_count = vertex_count;
 }
 
+/* ── Main draw function ──────────────────────────────────────────
+ * Renders all layers back-to-front in km-space (using camera MVP),
+ * then switches to a pixel-space ortho matrix for UI overlays.
+ * Drawing order: disc → land fill → boundary → grid → dist circles →
+ * night → aurora → DRAP → borders → coastlines → MUF → Es → target line →
+ * markers → labels → HUD text. */
 void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -898,6 +926,10 @@ void renderer_draw(const Renderer *r, const float *mvp, int fb_w, int fb_h)
     glBindVertexArray(0);
 }
 
+/* ── Button / popup / sidebar drawing ────────────────────────────
+ * These run in a separate full-window viewport pass so buttons can
+ * span both the map area and sidebar. */
+
 void renderer_draw_buttons(const Renderer *r, int fb_w, int fb_h)
 {
     if (fb_w <= 0 || fb_h <= 0) return;
@@ -1059,6 +1091,8 @@ void renderer_draw_sidebar(const Renderer *r, int w, int h)
 
     glBindVertexArray(0);
 }
+
+/* ── Cleanup ─────────────────────────────────────────────────────── */
 
 void renderer_destroy(Renderer *r)
 {

@@ -1,14 +1,22 @@
+/* fetch.c — Threaded non-blocking HTTP GET via libcurl + pthread.
+ *
+ * Each request runs in a detached thread so the main GL loop never blocks.
+ * A mutex protects the shared status/response fields; the main loop polls
+ * fetch_check() each frame and takes ownership of the response when ready. */
+
 #include <stdlib.h>
 #include <string.h>
 #include <curl/curl.h>
 #include "fetch.h"
 
+/* Growable buffer for accumulating curl response data. */
 typedef struct {
     char   *data;
     size_t  len;
     size_t  cap;
 } Buffer;
 
+/* libcurl write callback: appends received data to the growable buffer. */
 static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
 {
     Buffer *buf = userdata;
@@ -16,7 +24,7 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
     if (buf->len + total + 1 > buf->cap) {
         size_t newcap = (buf->cap + total + 1) * 2;
         char *p = realloc(buf->data, newcap);
-        if (!p) return 0;
+        if (!p) return 0;   /* signal error to curl */
         buf->data = p;
         buf->cap = newcap;
     }
@@ -26,6 +34,7 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
     return total;
 }
 
+/* Thread entry point: performs the HTTP GET and stores result under mutex. */
 static void *fetch_thread(void *arg)
 {
     FetchRequest *req = arg;
@@ -70,6 +79,7 @@ static void *fetch_thread(void *arg)
     return NULL;
 }
 
+/* Spawn a detached background thread to fetch the given URL. */
 void fetch_start(FetchRequest *req, const char *url)
 {
     memset(req, 0, sizeof(*req));
@@ -88,6 +98,7 @@ void fetch_start(FetchRequest *req, const char *url)
     pthread_attr_destroy(&attr);
 }
 
+/* Poll status: 0=pending, 1=done, -1=error.  Lock-protected. */
 int fetch_check(FetchRequest *req)
 {
     pthread_mutex_lock(&req->mutex);
@@ -96,6 +107,7 @@ int fetch_check(FetchRequest *req)
     return s;
 }
 
+/* Transfer ownership of the response string to the caller (who must free it). */
 char *fetch_take_response(FetchRequest *req)
 {
     pthread_mutex_lock(&req->mutex);
@@ -105,6 +117,7 @@ char *fetch_take_response(FetchRequest *req)
     return r;
 }
 
+/* Release URL and response memory, destroy mutex. */
 void fetch_cleanup(FetchRequest *req)
 {
     free(req->url);

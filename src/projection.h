@@ -1,3 +1,11 @@
+/* projection.h — Map projection math (azimuthal equidistant + orthographic).
+ *
+ * Provides forward/inverse projection between geographic coordinates (lat/lon
+ * in degrees) and a planar km-space centered on a configurable point.  Two
+ * modes are supported: azimuthal equidistant (full Earth disc, radius ~20015 km)
+ * and orthographic (front hemisphere only, radius 6371 km).  Also provides
+ * great-circle distance and initial azimuth calculations. */
+
 #ifndef PROJECTION_H
 #define PROJECTION_H
 

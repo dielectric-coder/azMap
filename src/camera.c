@@ -1,3 +1,9 @@
+/* camera.c — Orthographic view state and MVP matrix for the map viewport.
+ *
+ * The camera maps projected km-space to OpenGL clip coordinates [-1,1].
+ * zoom_km controls the visible diameter; pan_x/pan_y shift the view center.
+ * The MVP matrix is a simple 2D orthographic projection. */
+
 #include "camera.h"
 #include <string.h>
 

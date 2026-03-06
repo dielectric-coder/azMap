@@ -1,12 +1,21 @@
+/* nightmesh.c — Day/night overlay mesh generation.
+ *
+ * Builds a polar triangle mesh covering the Earth disc.  For each vertex,
+ * the inverse projection recovers lat/lon, the solar zenith angle determines
+ * opacity (transparent in daylight, smoothstepped through twilight, opaque
+ * at night).  Alpha values are precomputed on a grid to avoid redundant
+ * inverse-projection and trig calls, then triangles with all-zero alpha
+ * are skipped to reduce GPU work. */
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "nightmesh.h"
 #include "projection.h"
 
-#define ANGULAR_DIVS  180
-#define RADIAL_DIVS    60
-#define MAX_ALPHA      0.75f
+#define ANGULAR_DIVS  180   /* azimuthal slices around the disc */
+#define RADIAL_DIVS    60   /* radial rings from center to edge */
+#define MAX_ALPHA      0.75f  /* maximum darkness (not fully opaque for aesthetics) */
 
 /* Smooth alpha from zenith angle: 0 at zenith<=80, MAX_ALPHA at zenith>=108 */
 static float zenith_to_alpha(double z)

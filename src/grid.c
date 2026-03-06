@@ -1,3 +1,13 @@
+/* grid.c — Grid geometry generation for map overlays.
+ *
+ * Three grid types:
+ * - grid_build(): AZEQ mode — concentric range rings + radial azimuth lines,
+ *   drawn directly in km-space (no projection needed).
+ * - grid_build_geo(): ORTHO mode — geographic parallels + meridians, projected
+ *   through projection_forward() with back-hemisphere clipping.
+ * - grid_build_dist_circles(): great-circle distance rings from the source
+ *   location, computed via the forward geodesic formula and projected. */
+
 #include <math.h>
 #include <stdlib.h>
 #include "grid.h"

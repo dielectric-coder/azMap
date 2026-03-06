@@ -1,3 +1,10 @@
+/* text.h — Built-in vector stroke font for on-screen text.
+ *
+ * Renders uppercase A–Z, lowercase a–z, digits 0–9, and common punctuation
+ * as GL_LINES segments.  Each glyph is defined in a normalized 0–1 cell;
+ * text_build() scales and positions them into pixel-space vertex buffers.
+ * No external font files or libraries required. */
+
 #ifndef TEXT_H
 #define TEXT_H
 

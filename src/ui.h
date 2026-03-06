@@ -1,3 +1,10 @@
+/* ui.h — UI system: buttons, draggable popup panel, text input, sidebar.
+ *
+ * Manages a set of clickable buttons (rounded rectangles with three visual
+ * states: normal/hovered/active), a modal popup with text input for callsign
+ * entry, and the sidebar panel with station info.  All geometry is built
+ * each frame into vertex buffers for the renderer. */
+
 #ifndef UI_H
 #define UI_H
 

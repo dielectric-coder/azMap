@@ -1,3 +1,14 @@
+/* overlay.c — Radio propagation and space weather overlay data parsing/projection.
+ *
+ * Four overlay types, each with parse → store → project → render pipeline:
+ * - MUF: GeoJSON LineStrings with per-feature color/level, split at jumps
+ * - Sporadic E: station foEs values → IDW grid → marching squares contours
+ * - Aurora: OVATION probability grid → polar mesh with alpha mapping
+ * - DRAP: HAF text grid → bilinear lookup → polar mesh with alpha mapping
+ *
+ * MUF and Sporadic E share the MufData struct; Aurora and DRAP share the
+ * AuroraMesh struct (same polar mesh generation pattern as nightmesh). */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -309,12 +320,19 @@ static void ms_edge_interp(int edge, int r, int c,
     }
 }
 
+/* Parse KC2G stations JSON into Sporadic E contour lines.
+ *
+ * Pipeline: 1) Extract ionosonde stations with valid foEs readings
+ *           2) IDW interpolation onto a 2° regular grid (power=2, radius 2500 km)
+ *           3) Marching squares to extract contour line fragments
+ *           4) Chain fragments into polylines by endpoint matching
+ *           5) Project into km-space via muf_reproject() */
 int spore_parse_json(const char *json_str, MufData *m)
 {
     cJSON *root = cJSON_Parse(json_str);
     if (!root || !cJSON_IsArray(root)) { cJSON_Delete(root); return -1; }
 
-    /* Extract stations with valid foEs */
+    /* Step 1: Extract stations with valid foEs */
     double sta_lat[SPORE_MAX_STATIONS], sta_lon[SPORE_MAX_STATIONS];
     float sta_foes[SPORE_MAX_STATIONS];
     int nsta = 0;
@@ -350,7 +368,9 @@ int spore_parse_json(const char *json_str, MufData *m)
 
     if (nsta < 3) return -1; /* not enough data */
 
-    /* IDW interpolation to regular grid */
+    /* Step 2: IDW (Inverse Distance Weighting) interpolation to regular grid.
+     * For each grid cell, weight = 1/d² where d = haversine distance to station.
+     * Only stations within SPORE_MAX_RADIUS_KM contribute. */
     int grid_sz = SPORE_GRID_ROWS * SPORE_GRID_COLS;
     float *grid = malloc(grid_sz * sizeof(float));
     int *grid_valid = calloc(grid_sz, sizeof(int));
@@ -383,7 +403,11 @@ int spore_parse_json(const char *json_str, MufData *m)
         }
     }
 
-    /* Marching squares: collect raw edge segments, then chain into polylines */
+    /* Step 3: Marching squares — collect raw edge-crossing fragments.
+     * For each 2×2 cell, classify corners above/below the contour level
+     * into a 4-bit case index.  The ms_edges lookup table maps each case
+     * to a pair of edges to connect.  Saddle cases (0101, 1010) are
+     * disambiguated using the cell center average. */
     #define MS_MAX_FRAGS 8000
     typedef struct { double lat[2], lon[2]; } MsFrag;
     MsFrag *frags = malloc(MS_MAX_FRAGS * sizeof(MsFrag));
@@ -512,8 +536,10 @@ int spore_parse_json(const char *json_str, MufData *m)
             }
         }
 
-        /* Phase 2: chain fragments into polylines.
-         * Two fragment endpoints match if they are within half a grid cell. */
+        /* Step 4: Chain fragments into polylines by endpoint matching.
+         * Two fragment endpoints match if within MS_EPS (~1°, half a grid cell).
+         * For each unchained seed fragment, extend forward (match tail) and
+         * backward (match head, prepending via memmove) greedily. */
         #define MS_EPS 1.01  /* slightly over 1° — half of 2° grid */
         int *used = calloc(nfrags, sizeof(int));
         if (!used) continue;
@@ -844,6 +870,8 @@ void drap_grid_free(DrapGrid *g)
     g->valid = 0;
 }
 
+/* Parse NOAA DRAP text file: comment lines (#), longitude header row,
+ * then data rows with latitude | frequency values at 4°×2° resolution. */
 int drap_parse_text(const char *text, DrapGrid *g)
 {
     if (!text) return -1;

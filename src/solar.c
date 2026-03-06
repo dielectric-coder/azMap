@@ -1,3 +1,9 @@
+/* solar.c — Subsolar point and solar zenith angle calculations.
+ *
+ * Uses a simplified model: declination from the cosine approximation of the
+ * Earth's axial tilt cycle, and subsolar longitude from UTC hour angle
+ * (sun crosses 0° lon at 12:00 UTC, moving 15°/hour westward). */
+
 #include <math.h>
 #include <time.h>
 #include "solar.h"
@@ -34,6 +40,9 @@ SubsolarPoint solar_subsolar_point(time_t utc_time)
     return sp;
 }
 
+/* Zenith angle = angular distance between the observer and the subsolar point.
+ * cos(z) = sin(lat1)*sin(lat2) + cos(lat1)*cos(lat2)*cos(dlon)
+ * Returns degrees: 0° = sun directly overhead, 90° = horizon, >90° = night. */
 double solar_zenith_angle(double lat_deg, double lon_deg,
                           const SubsolarPoint *sun)
 {
@@ -42,6 +51,7 @@ double solar_zenith_angle(double lat_deg, double lon_deg,
     double lat2 = sun->lat_deg * DEG2RAD;
     double lon2 = sun->lon_deg * DEG2RAD;
 
+    /* Spherical law of cosines for angular distance */
     double cos_z = sin(lat1) * sin(lat2) +
                    cos(lat1) * cos(lat2) * cos(lon1 - lon2);
 

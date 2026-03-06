@@ -1,3 +1,9 @@
+/* qrz.h — QRZ.com amateur radio callsign lookup via XML API.
+ *
+ * Authenticates with QRZ.com credentials, then looks up callsigns to retrieve
+ * name, location, Maidenhead grid square, and lat/lon coordinates.  Uses
+ * libcurl for HTTP; sessions auto-renew on timeout. */
+
 #ifndef QRZ_H
 #define QRZ_H
 

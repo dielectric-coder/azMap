@@ -1,3 +1,11 @@
+/* config.c — Load/save ~/.config/azmap.conf.
+ *
+ * Format: simple key = value pairs, # comments.  config_load() reads all
+ * known keys into a Config struct.  config_save_state() uses a merge-write
+ * strategy: reads existing lines, replaces matching state keys in-place,
+ * appends any missing keys, and writes back — preserving comments, ordering,
+ * and user-managed entries like credentials. */
+
 #include "config.h"
 #include <stdio.h>
 #include <stdlib.h>

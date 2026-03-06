@@ -1,3 +1,11 @@
+/* qrz.c — QRZ.com callsign lookup via XML API.
+ *
+ * Two-step process: login (username/password → session key), then lookup
+ * (session key + callsign → XML with lat/lon/name/grid/etc).  Session keys
+ * expire; on timeout the login is retried once automatically.  Uses a simple
+ * strstr-based XML tag extractor (no full XML parser needed for QRZ's
+ * flat response format). */
+
 #include "qrz.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,9 +13,9 @@
 #include <ctype.h>
 #include <curl/curl.h>
 
-static char qrz_user[64];
-static char qrz_pass[64];
-static char session_key[64];
+static char qrz_user[64];    /* QRZ.com username (callsign) */
+static char qrz_pass[64];    /* QRZ.com password */
+static char session_key[64]; /* current API session key (expires periodically) */
 
 /* Dynamic buffer for curl response */
 typedef struct {
