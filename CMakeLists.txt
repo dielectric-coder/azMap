@@ -5,7 +5,7 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH "Install prefix" FORCE)
 endif()
 
-project(azmap C)
+project(azmap VERSION 1.0.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -63,6 +63,10 @@ target_link_libraries(azmap PRIVATE
     pthread
 )
 
+target_compile_definitions(azmap PRIVATE
+    AZMAP_VERSION="${PROJECT_VERSION}"
+)
+
 target_compile_options(azmap PRIVATE
     ${GLFW3_CFLAGS_OTHER}
     ${GLEW_CFLAGS_OTHER}
@@ -79,7 +83,24 @@ add_custom_target(copy_shaders ALL
 )
 add_dependencies(azmap copy_shaders)
 
-# Install binary and shaders
+# Generate application icons at build time (multiple sizes for hicolor theme)
+add_executable(gen_icon EXCLUDE_FROM_ALL tools/gen_icon.c)
+target_link_libraries(gen_icon PRIVATE m)
+set(ICON_SIZES 32 48 64 128 256)
+set(ICON_OUTPUTS)
+foreach(SZ IN LISTS ICON_SIZES)
+    set(ICON_FILE ${CMAKE_BINARY_DIR}/azmap-${SZ}.png)
+    list(APPEND ICON_OUTPUTS ${ICON_FILE})
+    add_custom_command(
+        OUTPUT ${ICON_FILE}
+        COMMAND gen_icon ${SZ} ${ICON_FILE}
+        DEPENDS gen_icon
+        COMMENT "Generating ${SZ}x${SZ} application icon"
+    )
+endforeach()
+add_custom_target(generate_icons ALL DEPENDS ${ICON_OUTPUTS})
+
+# Install binary, shaders, icons, and desktop file
 include(GNUInstallDirs)
 install(TARGETS azmap RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(DIRECTORY shaders/ DESTINATION ${CMAKE_INSTALL_DATADIR}/azmap/shaders)
@@ -88,3 +109,10 @@ install(DIRECTORY data/ DESTINATION ${CMAKE_INSTALL_DATADIR}/azmap/data
     FILES_MATCHING
     PATTERN "*.shp" PATTERN "*.shx" PATTERN "*.dbf" PATTERN "*.prj"
 )
+foreach(SZ IN LISTS ICON_SIZES)
+    install(FILES ${CMAKE_BINARY_DIR}/azmap-${SZ}.png
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${SZ}x${SZ}/apps
+        RENAME azmap.png)
+endforeach()
+install(FILES data/azmap.desktop
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=azMap
+Comment=Interactive azimuthal map projection viewer
+Exec=azmap
+Icon=azmap
+StartupWMClass=azmap
+Terminal=false
+Categories=Education;Science;Geography;HamRadio;

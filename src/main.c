@@ -38,6 +38,7 @@
 #include "qrz.h"
 #include "overlay.h"
 #include "fetch.h"
+#include "icon.h"
 
 #define DEFAULT_WIDTH  800
 #define DEFAULT_HEIGHT 800
@@ -432,10 +433,16 @@ int main(int argc, char **argv)
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_SAMPLES, 4);
     glfwWindowHint(GLFW_STENCIL_BITS, 8);
+#ifdef GLFW_WAYLAND_APP_ID
+    glfwWindowHintString(GLFW_WAYLAND_APP_ID, "azmap");
+#endif
+#ifdef GLFW_X11_CLASS_NAME
+    glfwWindowHintString(GLFW_X11_CLASS_NAME, "azmap");
+#endif
 
     int init_w = (cfg.window_valid) ? cfg.window_w : DEFAULT_WIDTH;
     int init_h = (cfg.window_valid) ? cfg.window_h : DEFAULT_HEIGHT;
-    GLFWwindow *window = glfwCreateWindow(init_w, init_h, "azMap", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(init_w, init_h, "azMap v" AZMAP_VERSION, NULL, NULL);
     if (!window) {
         fprintf(stderr, "Error: window creation failed\n");
         glfwTerminate();
@@ -443,6 +450,15 @@ int main(int argc, char **argv)
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
+
+    /* Set window icon (procedurally generated globe) */
+    {
+        const int icon_sz = 32;
+        unsigned char icon_pixels[32 * 32 * 4];
+        icon_generate_sz(icon_pixels, icon_sz);
+        GLFWimage icon_img = { icon_sz, icon_sz, icon_pixels };
+        glfwSetWindowIcon(window, 1, &icon_img);
+    }
 
     /* Init GLEW — ignore GLEW_ERROR_NO_GLX_DISPLAY on Wayland.
      * GLEW 2.1+ defines GLEW_ERROR_NO_GLX_DISPLAY = 4; use literal
